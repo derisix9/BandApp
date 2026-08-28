@@ -1,0 +1,74 @@
+{
+  "entities": {
+    "Quiz": {
+      "title": "Quiz",
+      "description": "A quiz with multiple choice questions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique timestamp identifier" },
+        "title": { "type": "string", "description": "Title of the quiz" },
+        "description": { "type": "string", "description": "Description of the quiz" },
+        "category": { "type": "string", "description": "Category or topic" },
+        "questionCount": { "type": "number", "description": "Number of questions" },
+        "questions": { "type": "array", "description": "List of questions" },
+        "isPublic": { "type": "boolean", "description": "Visibility to students" },
+        "allowPdfExport": { "type": "boolean", "description": "Whether students can download PDF on result screen" },
+        "allowTxtExport": { "type": "boolean", "description": "Whether students can copy or download TXT on result screen" },
+        "createdAt": { "type": "number", "description": "Creation timestamp" }
+      },
+      "required": ["id", "title", "category", "questions"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User account profile and stats",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Unique user ID" },
+        "email": { "type": "string", "description": "User email" },
+        "displayName": { "type": "string", "description": "Display name" },
+        "role": { "type": "string", "enum": ["admin", "student"], "description": "User role" },
+        "totalPoints": { "type": "number", "description": "Total points earned" },
+        "quizzesCompleted": { "type": "number", "description": "Number of quizzes completed" },
+        "averageScorePercent": { "type": "number", "description": "Average score percentage" },
+        "streakDays": { "type": "number", "description": "Active daily streak" },
+        "createdAt": { "type": "number", "description": "Account creation timestamp" }
+      },
+      "required": ["userId", "email", "role"]
+    },
+    "QuizAttempt": {
+      "title": "QuizAttempt",
+      "description": "Record of a completed quiz attempt",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Attempt ID" },
+        "userId": { "type": "string", "description": "User ID" },
+        "userEmail": { "type": "string", "description": "User email" },
+        "userName": { "type": "string", "description": "User display name" },
+        "quizId": { "type": "number", "description": "ID of the quiz taken" },
+        "quizTitle": { "type": "string", "description": "Title of the quiz" },
+        "category": { "type": "string", "description": "Quiz category" },
+        "scorePercent": { "type": "number", "description": "Score percentage" },
+        "correctCount": { "type": "number", "description": "Count of correct answers" },
+        "totalQuestions": { "type": "number", "description": "Total questions in quiz" },
+        "pointsEarned": { "type": "number", "description": "Points earned in this attempt" },
+        "timeSpentSeconds": { "type": "number", "description": "Time spent in seconds" },
+        "completedAt": { "type": "number", "description": "Completion timestamp" }
+      },
+      "required": ["id", "userId", "quizId", "scorePercent", "correctCount", "totalQuestions", "completedAt"]
+    }
+  },
+  "firestore": {
+    "/quizzes/{quizId}": {
+      "schema": "Quiz",
+      "description": "Collection of all created quizzes"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user profiles and statistics"
+    },
+    "/quiz_attempts/{attemptId}": {
+      "schema": "QuizAttempt",
+      "description": "Collection of all quiz attempts by users"
+    }
+  }
+}

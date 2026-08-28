@@ -1,0 +1,214 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+}
+
+/* ==========================================================================
+   LIGHT THEME OVERRIDES (.theme-light / html.light / [data-theme="light"])
+   ========================================================================== */
+
+.theme-light,
+html.light,
+html[data-theme="light"],
+body.theme-light {
+  color-scheme: light;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* Canvas & Global Containers */
+.theme-light .bg-slate-950,
+.theme-light #app-root,
+html.light .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+
+/* Main Header */
+.theme-light #bandapp-header,
+.theme-light header,
+html.light #bandapp-header,
+html.light header {
+  background-color: rgba(255, 255, 255, 0.94) !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05) !important;
+}
+
+/* Cards & Surface Containers */
+.theme-light .bg-slate-900,
+.theme-light .bg-slate-900\/80,
+.theme-light .bg-slate-900\/95,
+.theme-light .bg-slate-900\/70,
+.theme-light .bg-slate-900\/60,
+.theme-light .bg-slate-900\/50,
+.theme-light .bg-slate-900\/40,
+html.light .bg-slate-900 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Secondary Surface & Code/Excerpt Containers */
+.theme-light .bg-slate-950\/70,
+.theme-light .bg-slate-950\/60,
+.theme-light .bg-slate-950\/80,
+.theme-light .bg-slate-950\/40,
+.theme-light .bg-slate-950\/50,
+.theme-light .bg-slate-950\/90,
+.theme-light .bg-slate-950\/95,
+html.light .bg-slate-950\/70 {
+  background-color: #f1f5f9 !important;
+}
+
+/* Tertiary Surface & Chips / Inner Badges */
+.theme-light .bg-slate-800,
+.theme-light .bg-slate-800\/50,
+.theme-light .bg-slate-800\/80,
+.theme-light .bg-slate-800\/40,
+.theme-light .bg-slate-800\/60,
+html.light .bg-slate-800 {
+  background-color: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Hover States */
+.theme-light .hover\:bg-slate-800:hover,
+html.light .hover\:bg-slate-800:hover {
+  background-color: #e2e8f0 !important;
+}
+
+.theme-light .hover\:bg-slate-700:hover,
+html.light .hover\:bg-slate-700:hover {
+  background-color: #cbd5e1 !important;
+}
+
+.theme-light .hover\:bg-slate-900:hover,
+html.light .hover\:bg-slate-900:hover {
+  background-color: #f1f5f9 !important;
+}
+
+/* Borders */
+.theme-light .border-slate-800,
+.theme-light .border-slate-800\/80,
+.theme-light .border-slate-800\/60,
+.theme-light .border-slate-700,
+.theme-light .border-slate-700\/50,
+.theme-light .border-slate-700\/60,
+html.light .border-slate-800 {
+  border-color: #e2e8f0 !important;
+}
+
+/* Typography Hierarchy in Light Mode */
+.theme-light .text-slate-100,
+html.light .text-slate-100 {
+  color: #0f172a !important;
+}
+
+.theme-light .text-slate-200,
+html.light .text-slate-200 {
+  color: #1e293b !important;
+}
+
+.theme-light .text-slate-300,
+html.light .text-slate-300 {
+  color: #334155 !important;
+}
+
+.theme-light .text-slate-400,
+html.light .text-slate-400 {
+  color: #64748b !important;
+}
+
+.theme-light .text-slate-500,
+html.light .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+/* Direct Text White headings (except inside primary colored buttons/badges) */
+.theme-light h1.text-white,
+.theme-light h2.text-white,
+.theme-light h3.text-white,
+.theme-light h4.text-white,
+.theme-light span.text-white:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-rose"]):not([class*="bg-amber"]),
+.theme-light p.text-white,
+.theme-light strong.text-white,
+.theme-light div.text-white:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-rose"]):not([class*="bg-amber"]) {
+  color: #0f172a !important;
+}
+
+/* Form Controls (Inputs, Textareas, Selects) */
+.theme-light input[type="text"],
+.theme-light input[type="email"],
+.theme-light input[type="password"],
+.theme-light input[type="number"],
+.theme-light input[type="search"],
+.theme-light textarea,
+.theme-light select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light input::placeholder,
+.theme-light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+.theme-light input:focus,
+.theme-light textarea:focus,
+.theme-light select:focus {
+  border-color: #6366f1 !important;
+  background-color: #ffffff !important;
+}
+
+/* Option Cards for Quizzes */
+.theme-light [id^="option-"]:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-rose"]) {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+.theme-light [id^="option-"]:hover:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-rose"]) {
+  background-color: #f8fafc !important;
+  border-color: #a5b4fc !important;
+}
+
+.theme-light .bg-indigo-950\/40 {
+  background-color: #eef2ff !important;
+  color: #1e1b4b !important;
+}
+
+.theme-light .bg-emerald-950\/40,
+.theme-light .bg-emerald-950\/30 {
+  background-color: #ecfdf5 !important;
+  color: #064e3b !important;
+}
+
+.theme-light .bg-rose-950\/40,
+.theme-light .bg-rose-950\/30 {
+  background-color: #fff1f2 !important;
+  color: #881337 !important;
+}
+
+.theme-light .bg-amber-950\/40,
+.theme-light .bg-amber-950\/30 {
+  background-color: #fffbeb !important;
+  color: #78350f !important;
+}
+
+/* Modal Backdrops in Light Theme */
+.theme-light .fixed.inset-0.bg-slate-950\/80,
+.theme-light .fixed.inset-0.bg-slate-950\/70,
+.theme-light .fixed.inset-0.bg-slate-950\/90 {
+  background-color: rgba(15, 23, 42, 0.5) !important;
+}
+
+/* Shadows in Light Theme */
+.theme-light .shadow-lg,
+.theme-light .shadow-md,
+.theme-light .shadow-xl {
+  box-shadow: 0 4px 12px 0 rgb(0 0 0 / 0.05), 0 2px 4px -1px rgb(0 0 0 / 0.03) !important;
+}
+

@@ -1,0 +1,6 @@
+{
+  "name": "BandApp",
+  "description": "Crie questionários de múltipla escolha (15 a 50+ perguntas) no sistema americano a partir de PDF, Word (.docx / .doc), Imagens ou importação direta via JSON sem IA, com prevenção inteligente de duplicatas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
