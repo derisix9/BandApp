@@ -41,9 +41,12 @@ export const StudentProgressChart: React.FC<StudentProgressChartProps> = ({
 
   const isLight = theme === "light";
 
-  // Filter attempts
+  // Filter attempts - only strictly completed quizzes
   const filteredAttempts = useMemo(() => {
-    const sorted = [...attempts].sort((a, b) => a.completedAt - b.completedAt);
+    const validCompleted = attempts.filter(
+      (a) => a && a.isCompleted !== false && a.completedAt > 0 && (a.totalQuestions || 0) > 0
+    );
+    const sorted = [...validCompleted].sort((a, b) => a.completedAt - b.completedAt);
     if (selectedCategory === "Todas") {
       return sorted;
     }

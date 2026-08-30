@@ -287,6 +287,55 @@ export function dismissNewQuizAlert(email: string, quizIds: number[]): void {
   }
 }
 
+export function getUserHiddenQuizIds(email?: string): number[] {
+  try {
+    if (!email || typeof localStorage === "undefined") return [];
+    const cleanEmail = email.trim().toLowerCase();
+    const raw = localStorage.getItem(`bandapp_hidden_quizzes_${cleanEmail}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function hideQuizForUser(email: string, quizId: number): void {
+  try {
+    if (!email || typeof localStorage === "undefined") return;
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = getUserHiddenQuizIds(email);
+    if (!existing.includes(quizId)) {
+      const updated = [...existing, quizId];
+      localStorage.setItem(`bandapp_hidden_quizzes_${cleanEmail}`, JSON.stringify(updated));
+    }
+  } catch (e) {
+    console.warn("Could not hide quiz for user:", e);
+  }
+}
+
+export function unhideQuizForUser(email: string, quizId: number): void {
+  try {
+    if (!email || typeof localStorage === "undefined") return;
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = getUserHiddenQuizIds(email);
+    const updated = existing.filter((id) => id !== quizId);
+    localStorage.setItem(`bandapp_hidden_quizzes_${cleanEmail}`, JSON.stringify(updated));
+  } catch (e) {
+    console.warn("Could not unhide quiz for user:", e);
+  }
+}
+
+export function unhideAllQuizzesForUser(email: string): void {
+  try {
+    if (!email || typeof localStorage === "undefined") return;
+    const cleanEmail = email.trim().toLowerCase();
+    localStorage.removeItem(`bandapp_hidden_quizzes_${cleanEmail}`);
+  } catch (e) {
+    console.warn("Could not unhide all quizzes for user:", e);
+  }
+}
+
 
 export function clearUserSession(): void {
   try {
@@ -393,13 +442,18 @@ export function getStoredQuizAttempts(userEmail?: string): QuizAttemptRecord[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
+    // Only return genuinely completed quiz attempts (not abandoned/in-progress)
+    const completedOnly = parsed.filter(
+      (a) => a && a.isCompleted !== false && a.completedAt > 0 && (a.totalQuestions || 0) > 0
+    );
+
     if (userEmail) {
-      const filtered = parsed.filter(
+      const filtered = completedOnly.filter(
         (a) => !a.userEmail || a.userEmail.toLowerCase() === userEmail.toLowerCase()
       );
       return filtered;
     }
-    return parsed;
+    return completedOnly;
   } catch {
     return [];
   }
@@ -407,8 +461,13 @@ export function getStoredQuizAttempts(userEmail?: string): QuizAttemptRecord[] {
 
 export function saveQuizAttempt(record: QuizAttemptRecord): void {
   try {
+    // Enforce isCompleted flag
+    const completedRecord: QuizAttemptRecord = {
+      ...record,
+      isCompleted: true,
+    };
     const existing = getStoredQuizAttempts();
-    const updated = [...existing, record];
+    const updated = [...existing, completedRecord];
     localStorage.setItem(STORAGE_KEYS.QUIZ_ATTEMPTS, JSON.stringify(updated));
   } catch (e) {
     console.warn("Could not save quiz attempt:", e);

@@ -18,6 +18,7 @@ import {
   saveStoredTheme,
   applyThemeToDocument,
   saveQuizAttempt,
+  hideQuizForUser,
 } from "./utils/storage";
 import {
   fetchQuizzesFromFirestore,
@@ -103,9 +104,15 @@ export default function App() {
   };
 
   const handleDeleteQuiz = async (quizId: number) => {
-    if (!currentUser || currentUser.role !== "admin") return;
-    await deleteQuizFromFirestore(quizId);
-    await refreshQuizzes();
+    if (!currentUser) return;
+    if (currentUser.role === "admin") {
+      // Admin deletes permanently from central Firestore database and local storage
+      await deleteQuizFromFirestore(quizId);
+      await refreshQuizzes();
+    } else {
+      // Student removes only from their personal area
+      hideQuizForUser(currentUser.email, quizId);
+    }
   };
 
   const handleUpdateQuizSettings = async (quizId: number, updates: Partial<Quiz>) => {
@@ -143,6 +150,7 @@ export default function App() {
           completedAt: Date.now(),
           userId: currentUser.userId,
           userEmail: currentUser.email,
+          isCompleted: true,
         };
         saveQuizAttempt(attemptRecord);
         await saveQuizAttemptToFirestore(attemptRecord, currentUser);

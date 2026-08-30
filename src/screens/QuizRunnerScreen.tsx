@@ -52,6 +52,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   const [showInstantExplanation, setShowInstantExplanation] = useState(true);
   const [showQuestionGrid, setShowQuestionGrid] = useState(false);
   const [showUnansweredWarning, setShowUnansweredWarning] = useState(false);
+  const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const [questionAutoAdvanceNotice, setQuestionAutoAdvanceNotice] = useState<string | null>(null);
 
   // Timer configuration & normalization
@@ -287,16 +288,29 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
       {/* Progress, Timer & Quick Controls */}
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs text-slate-400 gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setShowQuestionGrid(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white cursor-pointer transition-colors"
-          >
-            <Layers className="w-3.5 h-3.5 text-indigo-400" />
-            <span>
-              Respondidas: <strong className="text-white">{answeredCount}</strong> de {questions.length}
-            </span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              id="quiz-exit-btn"
+              onClick={() => setShowExitConfirmModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 hover:border-rose-500/50 text-slate-400 hover:text-rose-300 cursor-pointer transition-colors"
+              title="Sair do questionário sem registrar estatísticas"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span className="hidden xs:inline">Sair</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowQuestionGrid(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white cursor-pointer transition-colors"
+            >
+              <Layers className="w-3.5 h-3.5 text-indigo-400" />
+              <span>
+                Respondidas: <strong className="text-white">{answeredCount}</strong> de {questions.length}
+              </span>
+            </button>
+          </div>
 
           <div className="flex items-center gap-2">
             {/* Timer Display */}
@@ -443,6 +457,55 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
                   </button>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exit Confirmation Modal */}
+      {showExitConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-2">
+              <h3 className="text-lg font-bold text-white">Deseja sair do simulado?</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Você respondeu <strong className="text-white">{answeredCount}</strong> de <strong className="text-white">{questions.length}</strong> questões.
+              </p>
+              
+              <div className="p-3 rounded-2xl bg-slate-950/90 border border-amber-500/30 text-[11px] text-slate-300 text-left space-y-1.5 shadow-inner">
+                <div className="flex items-center gap-1.5 text-amber-400 font-bold text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>Regra de Estatísticas e Ranking</span>
+                </div>
+                <p className="leading-relaxed">
+                  Como este questionário <strong>não foi concluído</strong>, nenhuma resposta, tempo ou pontuação será registrado. Este teste <strong>NÃO constará no seu histórico de estatísticas nem no ranking dos estudantes</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowExitConfirmModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-colors cursor-pointer"
+              >
+                Continuar Simulado
+              </button>
+              <button
+                type="button"
+                id="confirm-exit-quiz-btn"
+                onClick={() => {
+                  setShowExitConfirmModal(false);
+                  onNavigateBack();
+                }}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-xs font-extrabold transition-all cursor-pointer shadow-lg shadow-rose-900/30"
+              >
+                Sair sem Registrar
+              </button>
             </div>
           </div>
         </div>

@@ -517,11 +517,15 @@ export async function saveQuizAttemptToFirestore(
   record: QuizAttemptRecord,
   user: UserAccount
 ): Promise<void> {
-  saveQuizAttemptLocal(record);
+  const completedRecord: QuizAttemptRecord = {
+    ...record,
+    isCompleted: true,
+  };
+  saveQuizAttemptLocal(completedRecord);
 
   try {
-    const attemptDocRef = doc(db, QUIZ_ATTEMPTS_COLLECTION, record.id);
-    await withTimeout(setDoc(attemptDocRef, record), 3500);
+    const attemptDocRef = doc(db, QUIZ_ATTEMPTS_COLLECTION, completedRecord.id);
+    await withTimeout(setDoc(attemptDocRef, completedRecord), 3500);
 
     // Update user stats in Firestore
     if (user.userId) {
@@ -531,7 +535,7 @@ export async function saveQuizAttemptToFirestore(
         const prevData = userSnap.data() as Partial<UserAccount>;
         const completed = (prevData.quizzesCompleted || 0) + 1;
         const prevScoreSum = (prevData.averageScorePercent || 0) * (prevData.quizzesCompleted || 0);
-        const newAvgScore = Math.round((prevScoreSum + record.scorePercent) / completed);
+        const newAvgScore = Math.round((prevScoreSum + completedRecord.scorePercent) / completed);
         const streakDays = Math.min(10, Math.max(1, Math.floor(completed / 2) + 1));
 
         await withTimeout(
@@ -566,7 +570,10 @@ export async function fetchQuizAttemptsFromFirestore(
 
     const attempts: QuizAttemptRecord[] = [];
     snap.forEach((docSnap) => {
-      attempts.push(docSnap.data() as QuizAttemptRecord);
+      const data = docSnap.data() as QuizAttemptRecord;
+      if (data && data.isCompleted !== false && data.completedAt > 0 && (data.totalQuestions || 0) > 0) {
+        attempts.push(data);
+      }
     });
 
     if (userEmail || userId) {
@@ -605,12 +612,15 @@ export async function fetchLeaderboardFromFirestore(
       });
     });
 
-    // 2. Fetch all real quiz attempts from Firestore
+    // 2. Fetch all real quiz attempts from Firestore (only completed)
     const attemptsRef = collection(db, QUIZ_ATTEMPTS_COLLECTION);
     const attemptsSnap = await withTimeout(getDocs(attemptsRef), 3500);
     const allAttempts: QuizAttemptRecord[] = [];
     attemptsSnap.forEach((d) => {
-      allAttempts.push(d.data() as QuizAttemptRecord);
+      const record = d.data() as QuizAttemptRecord;
+      if (record && record.isCompleted !== false && record.completedAt > 0 && (record.totalQuestions || 0) > 0) {
+        allAttempts.push(record);
+      }
     });
 
     // Also include local accounts if any

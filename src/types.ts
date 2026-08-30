@@ -80,6 +80,7 @@ export interface UserAccount {
   preferredAiProvider: string;
   streakDays?: number;
   lastActiveAt?: number;
+  hiddenQuizIds?: number[];
 }
 
 export interface DocumentHistoryItem {
@@ -133,6 +134,7 @@ export interface QuizAttemptRecord {
   completedAt: number;
   userId?: string;
   userEmail?: string;
+  isCompleted?: boolean;
 }
 
 export interface LeaderboardEntry {
