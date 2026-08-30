@@ -178,6 +178,7 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const isSubmittingRef = useRef<boolean>(false);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, isImg = false) => {
     const file = e.target.files?.[0];
@@ -303,57 +304,80 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
   };
 
   const handleCreateQuizFromJson = async () => {
+    if (isSubmittingRef.current || isAnalyzing) return;
+
     if (!jsonQuestions || jsonQuestions.length === 0) {
       setAnalysisError("Nenhuma pergunta carregada para criar o questionário.");
       return;
     }
 
-    const title = quizTitle.trim() || `Questionário ${selectedCategory} — ${jsonFileName || "Importação JSON"}`;
-    const desc = `Questionário do Sistema Americano com ${jsonQuestions.length} perguntas carregado diretamente do arquivo JSON (Sem IA).`;
+    isSubmittingRef.current = true;
+    setIsAnalyzing(true);
+    setAnalysisError(null);
 
-    const timerSettings = getComputedTimerValues();
+    try {
+      const title = quizTitle.trim() || `Questionário ${selectedCategory} — ${jsonFileName || "Importação JSON"}`;
+      const desc = `Questionário do Sistema Americano com ${jsonQuestions.length} perguntas carregado diretamente do arquivo JSON (Sem IA).`;
 
-    const newQuiz: Quiz = {
-      id: Date.now(),
-      title,
-      description: desc,
-      category: selectedCategory,
-      sourceFileName: jsonFileName || "importacao_questoes.json",
-      sourceFileType: "JSON",
-      sourceFileHash: `json_${Date.now()}_${jsonQuestions.length}`,
-      questionCount: jsonQuestions.length,
-      createdAt: Date.now(),
-      totalAnswered: 0,
-      lastScorePercent: 0,
-      lastCompletedAt: 0,
-      sectionsCoveredInfo: `Importação direta de ${jsonQuestions.length} questões no formato Sistema Americano (A, B, C, D) sem uso de IA.`,
-      questions: jsonQuestions.map((q, idx) => ({
-        ...q,
-        id: Date.now() + idx,
-        quizId: Date.now(),
-        category: q.category || selectedCategory,
-      })),
-      isPublic,
-      allowPdfExport,
-      allowTxtExport,
-      timerMode: timerSettings.timerMode,
-      timerScope: timerSettings.timerScope,
-      timerUnit: timerSettings.timerUnit,
-      timerValue: timerSettings.timerValue,
-      timerSeconds: timerSettings.timerSeconds,
-      timerMinutes: timerSettings.timerMinutes,
-      createdByEmail: currentUserEmail,
-    };
+      const timerSettings = getComputedTimerValues();
 
-    await saveQuizToFirestore(newQuiz, currentUserRole);
-    setCreatedQuizId(newQuiz.id);
+      // Check if an existing quiz has the same title and category to avoid creating duplicate ghost records
+      const existingMatch = quizzes.find(
+        (q) =>
+          q.title.trim().toLowerCase() === title.toLowerCase() &&
+          (q.category || "").trim().toLowerCase() === selectedCategory.trim().toLowerCase()
+      );
 
-    setProgress({
-      step: 4,
-      totalSteps: 4,
-      statusMessage: `Questionário com ${jsonQuestions.length} perguntas gravado na base de dados Firebase Firestore com sucesso!`,
-      isComplete: true,
-    });
+      const targetId = existingMatch ? existingMatch.id : Date.now();
+
+      const newQuiz: Quiz = {
+        id: targetId,
+        title,
+        description: desc,
+        category: selectedCategory,
+        sourceFileName: jsonFileName || "importacao_questoes.json",
+        sourceFileType: "JSON",
+        sourceFileHash: `json_${targetId}_${jsonQuestions.length}`,
+        questionCount: jsonQuestions.length,
+        createdAt: existingMatch?.createdAt || Date.now(),
+        totalAnswered: existingMatch?.totalAnswered || 0,
+        lastScorePercent: existingMatch?.lastScorePercent || 0,
+        lastCompletedAt: existingMatch?.lastCompletedAt || 0,
+        sectionsCoveredInfo: `Importação direta de ${jsonQuestions.length} questões no formato Sistema Americano (A, B, C, D) sem uso de IA.`,
+        questions: jsonQuestions.map((q, idx) => ({
+          ...q,
+          id: targetId + idx,
+          quizId: targetId,
+          category: q.category || selectedCategory,
+        })),
+        isPublic,
+        allowPdfExport,
+        allowTxtExport,
+        timerMode: timerSettings.timerMode,
+        timerScope: timerSettings.timerScope,
+        timerUnit: timerSettings.timerUnit,
+        timerValue: timerSettings.timerValue,
+        timerSeconds: timerSettings.timerSeconds,
+        timerMinutes: timerSettings.timerMinutes,
+        createdByEmail: currentUserEmail,
+      };
+
+      await saveQuizToFirestore(newQuiz, currentUserRole);
+      setCreatedQuizId(newQuiz.id);
+
+      setProgress({
+        step: 4,
+        totalSteps: 4,
+        statusMessage: `Questionário "${title}" com ${jsonQuestions.length} perguntas gravado no Firebase com sucesso!`,
+        isComplete: true,
+      });
+    } catch (err: any) {
+      console.error("Erro ao gravar questionário JSON no Firebase:", err);
+      setAnalysisError(err?.message || "Falha ao gravar questionário na base de dados.");
+    } finally {
+      setIsAnalyzing(false);
+      isSubmittingRef.current = false;
+    }
   };
 
   const handleAppendQuizFromJson = async () => {
@@ -428,6 +452,8 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
   };
 
   const handleCreateQuiz = async () => {
+    if (isSubmittingRef.current) return;
+
     let currentAnalysis = analysis;
     if (!currentAnalysis) {
       if (pastedText.trim().length >= 30) {
@@ -444,6 +470,7 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
       }
     }
 
+    isSubmittingRef.current = true;
     setProgress({
       step: 1,
       totalSteps: 4,
@@ -565,6 +592,8 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
         isComplete: false,
         error: err.message || "Erro desconhecido ao processar questionário.",
       });
+    } finally {
+      isSubmittingRef.current = false;
     }
   };
 

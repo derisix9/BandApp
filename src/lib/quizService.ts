@@ -416,14 +416,62 @@ export async function fetchQuizzesFromFirestore(currentUserRole: UserRole): Prom
       return local.filter((q) => (currentUserRole === "admin" ? true : q.isPublic !== false));
     }
 
-    const quizzes: Quiz[] = [];
+    const seenTitlesMap = new Map<string, { docId: string; quiz: Quiz }>();
+    const duplicateDocIdsToDelete: string[] = [];
+
     snap.forEach((docSnap) => {
       const data = docSnap.data() as Quiz;
-      quizzes.push({
+      const docId = docSnap.id;
+      const quizObj: Quiz = {
         ...data,
-        id: data.id || Number(docSnap.id) || Date.now(),
-      });
+        id: data.id || Number(docId) || Date.now(),
+      };
+
+      if (!quizObj.title) return;
+
+      // Key based on normalized title and category to catch duplicate uploads/imports
+      const key = `${quizObj.title.trim().toLowerCase()}___${(quizObj.category || "").trim().toLowerCase()}`;
+
+      if (seenTitlesMap.has(key)) {
+        const existingEntry = seenTitlesMap.get(key)!;
+        const existingQuestionsLen = existingEntry.quiz.questions?.length || existingEntry.quiz.questionCount || 0;
+        const newQuestionsLen = quizObj.questions?.length || quizObj.questionCount || 0;
+
+        // Keep the one with more questions or more recent createdAt
+        if (
+          newQuestionsLen > existingQuestionsLen ||
+          (newQuestionsLen === existingQuestionsLen && (quizObj.createdAt || 0) >= (existingEntry.quiz.createdAt || 0))
+        ) {
+          duplicateDocIdsToDelete.push(existingEntry.docId);
+          seenTitlesMap.set(key, { docId, quiz: quizObj });
+        } else {
+          duplicateDocIdsToDelete.push(docId);
+        }
+      } else {
+        seenTitlesMap.set(key, { docId, quiz: quizObj });
+      }
     });
+
+    // Proactively clean up duplicate documents from Firestore
+    if (duplicateDocIdsToDelete.length > 0 && currentUserRole === "admin") {
+      duplicateDocIdsToDelete.forEach((dupId) => {
+        try {
+          deleteDoc(doc(db, QUIZZES_COLLECTION, dupId)).catch(() => {});
+        } catch {}
+      });
+    }
+
+    const quizzes: Quiz[] = [];
+    seenTitlesMap.forEach((entry) => {
+      quizzes.push(entry.quiz);
+    });
+
+    // Sync clean list to local storage
+    if (quizzes.length > 0) {
+      try {
+        localStorage.setItem("bandapp_quizzes_v1", JSON.stringify(quizzes));
+      } catch {}
+    }
 
     // Sort by createdAt desc
     quizzes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));

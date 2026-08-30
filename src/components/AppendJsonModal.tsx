@@ -46,6 +46,7 @@ export const AppendJsonModal: React.FC<AppendJsonModalProps> = ({
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isSubmittingRef = useRef<boolean>(false);
 
   const existingQuestionsCount = quiz.questions?.length || quiz.questionCount || 0;
 
@@ -97,11 +98,14 @@ export const AppendJsonModal: React.FC<AppendJsonModalProps> = ({
   };
 
   const handleConfirmAppend = async () => {
+    if (isSubmittingRef.current || isSaving) return;
+
     if (!jsonQuestions || jsonQuestions.length === 0) {
       setErrorMessage("Carregue ou valide as perguntas JSON antes de confirmar.");
       return;
     }
 
+    isSubmittingRef.current = true;
     setIsSaving(true);
     setErrorMessage(null);
 
@@ -128,6 +132,7 @@ export const AppendJsonModal: React.FC<AppendJsonModalProps> = ({
       setErrorMessage(err.message || "Falha ao gravar novas perguntas no questionário.");
     } finally {
       setIsSaving(false);
+      isSubmittingRef.current = false;
     }
   };
 

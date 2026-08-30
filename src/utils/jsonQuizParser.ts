@@ -98,6 +98,7 @@ export function parseJsonToQuestions(
     }
 
     const validatedQuestions: Question[] = [];
+    const seenQuestionTexts = new Set<string>();
 
     for (let i = 0; i < rawQuestions.length; i++) {
       const item = rawQuestions[i];
@@ -114,7 +115,15 @@ export function parseJsonToQuestions(
         item.title ||
         "";
 
-      if (!questionText.trim()) continue;
+      const cleanQText = questionText.trim();
+      if (!cleanQText) continue;
+
+      // Deduplicate inside the same JSON file
+      const normalizedKey = cleanQText.toLowerCase();
+      if (seenQuestionTexts.has(normalizedKey)) {
+        continue;
+      }
+      seenQuestionTexts.add(normalizedKey);
 
       // Extract options
       let optA = "";

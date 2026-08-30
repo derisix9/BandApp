@@ -32,7 +32,27 @@ export function getStoredQuizzes(): Quiz[] {
       return [];
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+
+    // Deduplicate in memory
+    const uniqueMap = new Map<string, Quiz>();
+    parsed.forEach((q: Quiz) => {
+      if (!q || !q.title) return;
+      const key = `${q.title.trim().toLowerCase()}___${(q.category || "").trim().toLowerCase()}`;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, q);
+      } else {
+        // Keep the one with more questions or more recent timestamp
+        const existing = uniqueMap.get(key)!;
+        const existCount = existing.questions?.length || existing.questionCount || 0;
+        const newCount = q.questions?.length || q.questionCount || 0;
+        if (newCount > existCount || (newCount === existCount && (q.createdAt || 0) > (existing.createdAt || 0))) {
+          uniqueMap.set(key, q);
+        }
+      }
+    });
+
+    return Array.from(uniqueMap.values());
   } catch {
     return [];
   }
@@ -40,11 +60,21 @@ export function getStoredQuizzes(): Quiz[] {
 
 export function saveQuiz(quiz: Quiz): void {
   const quizzes = getStoredQuizzes();
-  const existingIdx = quizzes.findIndex((q) => q.id === quiz.id);
+  const cleanTitle = quiz.title.trim().toLowerCase();
+  const cleanCat = (quiz.category || "").trim().toLowerCase();
+
+  const existingIdx = quizzes.findIndex(
+    (q) => q.id === quiz.id || (cleanTitle && q.title.trim().toLowerCase() === cleanTitle && (q.category || "").trim().toLowerCase() === cleanCat)
+  );
+
   let updated: Quiz[];
   if (existingIdx >= 0) {
     updated = [...quizzes];
-    updated[existingIdx] = quiz;
+    updated[existingIdx] = {
+      ...quizzes[existingIdx],
+      ...quiz,
+      id: quizzes[existingIdx].id || quiz.id, // Preserve consistent ID
+    };
   } else {
     updated = [quiz, ...quizzes];
   }
