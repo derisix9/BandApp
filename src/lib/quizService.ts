@@ -446,6 +446,10 @@ export async function saveQuizToFirestore(quiz: Quiz, userRole: UserRole): Promi
     allowPdfExport: quiz.allowPdfExport !== undefined ? quiz.allowPdfExport : true,
     allowTxtExport: quiz.allowTxtExport !== undefined ? quiz.allowTxtExport : true,
     timerMode: quiz.timerMode || "free",
+    timerScope: quiz.timerScope || "general",
+    timerUnit: quiz.timerUnit || "minutes",
+    timerValue: quiz.timerValue,
+    timerSeconds: quiz.timerSeconds,
     timerMinutes: quiz.timerMinutes || (quiz.timerMode === "timed" ? 20 : undefined),
   };
 

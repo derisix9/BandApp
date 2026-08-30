@@ -32,6 +32,8 @@ import {
   Quiz,
   Question,
   TimerMode,
+  TimerScope,
+  TimerUnit,
   UserRole,
 } from "../types";
 import { processDocumentContent } from "../utils/documentProcessor";
@@ -115,6 +117,9 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
 
   // Timer Configuration
   const [timerMode, setTimerMode] = useState<TimerMode>("free");
+  const [timerScope, setTimerScope] = useState<TimerScope>("general");
+  const [timerUnit, setTimerUnit] = useState<TimerUnit>("minutes");
+  const [timerValue, setTimerValue] = useState<number>(20);
   const [timerMinutes, setTimerMinutes] = useState<number>(20);
 
   // Student Visibility Configuration (Public vs Draft)
@@ -172,6 +177,34 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  const getComputedTimerValues = () => {
+    if (timerMode !== "timed") {
+      return {
+        timerMode: "free" as TimerMode,
+        timerScope: undefined,
+        timerUnit: undefined,
+        timerValue: undefined,
+        timerSeconds: undefined,
+        timerMinutes: undefined,
+      };
+    }
+    const val = Math.max(1, Number(timerValue) || (timerScope === "individual" ? 30 : 20));
+    let totalSec = val;
+    if (timerUnit === "minutes") totalSec = val * 60;
+    else if (timerUnit === "hours") totalSec = val * 3600;
+
+    const legacyMin = Math.max(1, Math.round(totalSec / 60));
+
+    return {
+      timerMode: "timed" as TimerMode,
+      timerScope,
+      timerUnit,
+      timerValue: val,
+      timerSeconds: totalSec,
+      timerMinutes: legacyMin,
+    };
   };
 
   const handleJsonFileSelected = async (file: File) => {
@@ -251,6 +284,8 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
     const title = quizTitle.trim() || `Questionário ${selectedCategory} — ${jsonFileName || "Importação JSON"}`;
     const desc = `Questionário do Sistema Americano com ${jsonQuestions.length} perguntas carregado diretamente do arquivo JSON (Sem IA).`;
 
+    const timerSettings = getComputedTimerValues();
+
     const newQuiz: Quiz = {
       id: Date.now(),
       title,
@@ -274,8 +309,12 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
       isPublic,
       allowPdfExport,
       allowTxtExport,
-      timerMode,
-      timerMinutes: timerMode === "timed" ? timerMinutes : undefined,
+      timerMode: timerSettings.timerMode,
+      timerScope: timerSettings.timerScope,
+      timerUnit: timerSettings.timerUnit,
+      timerValue: timerSettings.timerValue,
+      timerSeconds: timerSettings.timerSeconds,
+      timerMinutes: timerSettings.timerMinutes,
       createdByEmail: currentUserEmail,
     };
 
@@ -402,6 +441,8 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
           ? `Gerado a partir das seções [${processedSectionNums.join(", ")}] (Total no documento: ${currentAnalysis.existingQuestionsCountInDoc + generatedQuestions.length} questões).`
           : `Geração cobrindo seções [${processedSectionNums.join(", ")}] do arquivo.`;
 
+      const timerSettings = getComputedTimerValues();
+
       const newQuiz: Quiz = {
         id: Date.now(),
         title: quizTitle.trim() || `Questionário ${selectedCategory} — ${currentAnalysis.fileName}`,
@@ -420,8 +461,12 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
         isPublic,
         allowPdfExport,
         allowTxtExport,
-        timerMode,
-        timerMinutes: timerMode === "timed" ? timerMinutes : undefined,
+        timerMode: timerSettings.timerMode,
+        timerScope: timerSettings.timerScope,
+        timerUnit: timerSettings.timerUnit,
+        timerValue: timerSettings.timerValue,
+        timerSeconds: timerSettings.timerSeconds,
+        timerMinutes: timerSettings.timerMinutes,
         createdByEmail: currentUserEmail,
         customPromptInstruction: customPrompt.trim() || undefined,
       };
@@ -854,15 +899,16 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
         </div>
 
         {/* Timer Mode Selection */}
-        <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <Clock className="w-4 h-4 text-amber-400" />
               <span>Configuração do Temporizador (Limite de Tempo)</span>
             </label>
-            <span className="text-[11px] text-slate-500">Definido pelo Administrador</span>
+            <span className="text-[11px] text-slate-500 font-medium">Controle de Avaliação</span>
           </div>
 
+          {/* Mode Switch: Free vs Timed */}
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -878,7 +924,7 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
                 Tempo Livre
               </span>
               <span className="text-[10px] text-slate-400 font-normal">
-                Estudantes respondem sem contagem regressiva
+                Estudantes respondem sem limite de tempo
               </span>
             </button>
 
@@ -887,7 +933,7 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
               onClick={() => setTimerMode("timed")}
               className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex flex-col items-start gap-1 ${
                 timerMode === "timed"
-                  ? "bg-indigo-950/50 border-indigo-500 text-white ring-1 ring-indigo-500"
+                  ? "bg-amber-950/40 border-amber-500 text-white ring-1 ring-amber-500"
                   : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
               }`}
             >
@@ -896,34 +942,231 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
                 Temporizador Ativo
               </span>
               <span className="text-[10px] text-slate-400 font-normal">
-                Limite de minutos com finalização automática
+                Com contagem regressiva e controle de tempo
               </span>
             </button>
           </div>
 
+          {/* Advanced Timer Settings when Timed is active */}
           {timerMode === "timed" && (
-            <div className="pt-2 space-y-2 border-t border-slate-800/80">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-300 font-semibold">Duração da Avaliação:</span>
-                <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 font-bold">
-                  {timerMinutes} Minutos
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {[5, 10, 15, 20, 30, 45, 60].map((m) => (
+            <div className="pt-3 space-y-4 border-t border-slate-800/80">
+              {/* 1. Timer Scope: General vs Individual */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Tipo de Temporizador:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
                   <button
-                    key={m}
                     type="button"
-                    onClick={() => setTimerMinutes(m)}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                      timerMinutes === m
-                        ? "bg-amber-600 text-white"
-                        : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
+                    onClick={() => {
+                      setTimerScope("general");
+                      if (timerUnit === "seconds") setTimerUnit("minutes");
+                      if (timerValue < 1) setTimerValue(20);
+                    }}
+                    className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex flex-col items-start gap-1 ${
+                      timerScope === "general"
+                        ? "bg-indigo-950/60 border-indigo-500 text-white ring-1 ring-indigo-500"
+                        : "bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white"
                     }`}
                   >
-                    {m}m
+                    <span className="flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                      Geral (Todo o Quiz)
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      Tempo global para responder todas as questões
+                    </span>
                   </button>
-                ))}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTimerScope("individual");
+                      if (timerUnit === "hours") setTimerUnit("seconds");
+                      if (timerValue > 300 || timerValue < 5) setTimerValue(30);
+                    }}
+                    className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex flex-col items-start gap-1 ${
+                      timerScope === "individual"
+                        ? "bg-amber-950/60 border-amber-500 text-white ring-1 ring-amber-500"
+                        : "bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Timer className="w-3.5 h-3.5 text-amber-400" />
+                      Individual (Por Pergunta)
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      Tempo X por questão com avanço automático
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Timer Unit & Custom Duration Input */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-300 font-bold">Unidade e Duração:</span>
+                  <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTimerUnit("seconds");
+                        if (timerValue > 300) setTimerValue(30);
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
+                        timerUnit === "seconds"
+                          ? "bg-amber-500 text-slate-950 shadow-xs"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Segundos (s)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTimerUnit("minutes");
+                        if (timerValue > 180) setTimerValue(20);
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
+                        timerUnit === "minutes"
+                          ? "bg-amber-500 text-slate-950 shadow-xs"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Minutos (min)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTimerUnit("hours");
+                        if (timerValue > 12) setTimerValue(1);
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
+                        timerUnit === "hours"
+                          ? "bg-amber-500 text-slate-950 shadow-xs"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Horas (h)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Direct Number Input & Presets */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 relative">
+                    <input
+                      type="number"
+                      min={1}
+                      max={timerUnit === "seconds" ? 3600 : timerUnit === "minutes" ? 180 : 24}
+                      value={timerValue}
+                      onChange={(e) => setTimerValue(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-bold text-sm focus:outline-hidden focus:border-amber-500"
+                    />
+                    <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-semibold pointer-events-none">
+                      {timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"}
+                    </span>
+                  </div>
+
+                  {/* Preset quick buttons according to scope & unit */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {timerScope === "individual" ? (
+                      timerUnit === "seconds" ? (
+                        [15, 30, 45, 60, 90, 120].map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setTimerValue(val)}
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                              timerValue === val
+                                ? "bg-amber-600 text-white"
+                                : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
+                            }`}
+                          >
+                            {val}s
+                          </button>
+                        ))
+                      ) : (
+                        [1, 2, 3, 5].map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setTimerValue(val)}
+                            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                              timerValue === val
+                                ? "bg-amber-600 text-white"
+                                : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
+                            }`}
+                          >
+                            {val}m
+                          </button>
+                        ))
+                      )
+                    ) : timerUnit === "minutes" ? (
+                      [5, 10, 15, 20, 30, 45, 60].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setTimerValue(val)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                            timerValue === val
+                              ? "bg-amber-600 text-white"
+                              : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
+                          }`}
+                        >
+                          {val}m
+                        </button>
+                      ))
+                    ) : timerUnit === "hours" ? (
+                      [1, 2, 3].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setTimerValue(val)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                            timerValue === val
+                              ? "bg-amber-600 text-white"
+                              : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
+                          }`}
+                        >
+                          {val}h
+                        </button>
+                      ))
+                    ) : (
+                      [60, 120, 300, 600, 1200].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setTimerValue(val)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                            timerValue === val
+                              ? "bg-amber-600 text-white"
+                              : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
+                          }`}
+                        >
+                          {val}s
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Dynamic Behavior Summary Banner */}
+              <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-500/30 text-amber-200/90 text-xs flex items-start gap-2.5">
+                <Timer className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-bold text-amber-300">
+                    {timerScope === "individual"
+                      ? `Tempo Individual: ${timerValue} ${timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"} por questão`
+                      : `Tempo Geral: ${timerValue} ${timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"} no total`}
+                  </p>
+                  <p className="text-[11px] text-amber-200/75">
+                    {timerScope === "individual"
+                      ? `Cada aluno terá exatamente ${timerValue} ${timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"} para responder cada pergunta. Ao expirar o tempo, o sistema tocará um alerta e avançará automaticamente para a próxima.`
+                      : `O aluno terá ${timerValue} ${timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"} para responder todas as questões do questionário. Ao expirar o tempo, a prova será finalizada automaticamente.`}
+                  </p>
+                </div>
               </div>
             </div>
           )}

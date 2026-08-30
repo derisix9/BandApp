@@ -19,6 +19,8 @@ export interface Question {
 }
 
 export type TimerMode = "free" | "timed";
+export type TimerScope = "general" | "individual";
+export type TimerUnit = "seconds" | "minutes" | "hours";
 
 export interface Quiz {
   id: number;
@@ -40,7 +42,11 @@ export interface Quiz {
   allowPdfExport?: boolean; // When true (default), students can download PDF on result screen
   allowTxtExport?: boolean; // When true (default), students can copy/download TXT on result screen
   timerMode?: TimerMode; // 'free' or 'timed'
-  timerMinutes?: number; // Duration in minutes when timerMode === 'timed'
+  timerScope?: TimerScope; // 'general' (whole quiz) or 'individual' (per question)
+  timerUnit?: TimerUnit; // 'seconds' | 'minutes' | 'hours'
+  timerValue?: number; // Numeric value set by user
+  timerSeconds?: number; // Normalized duration in seconds (per question or total)
+  timerMinutes?: number; // Legacy duration in minutes when timerMode === 'timed'
   createdByEmail?: string;
   customPromptInstruction?: string; // Custom instruction provided by admin in chat/prompt mode
 }

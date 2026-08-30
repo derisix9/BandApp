@@ -153,33 +153,153 @@ export function clearDocumentHistoryMemory(): void {
   localStorage.removeItem(STORAGE_KEYS.DOC_HISTORY);
 }
 
-export function getUserSession(): UserAccount {
+const SESSION_EXPIRY_KEY = "bandapp_session_expiry_v1";
+
+export function getUserSession(): UserAccount | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.USER);
-    if (raw) return JSON.parse(raw);
+    // 1. Check sessionStorage (active tab session)
+    if (typeof sessionStorage !== "undefined") {
+      const sessionRaw = sessionStorage.getItem(STORAGE_KEYS.USER);
+      if (sessionRaw) {
+        const parsed = JSON.parse(sessionRaw);
+        if (parsed && parsed.email) return parsed;
+      }
+    }
+
+    // 2. Check localStorage (with 24 hours expiry check)
+    if (typeof localStorage !== "undefined") {
+      const localRaw = localStorage.getItem(STORAGE_KEYS.USER);
+      if (localRaw) {
+        const expiry = localStorage.getItem(SESSION_EXPIRY_KEY);
+        if (expiry) {
+          const expiryTime = Number(expiry);
+          // If expired (24 hours passed), clear it out
+          if (Date.now() > expiryTime) {
+            clearUserSession();
+            return null;
+          }
+        }
+        const parsed = JSON.parse(localRaw);
+        if (parsed && parsed.email) return parsed;
+      }
+    }
   } catch {}
 
-  const defaultUser: UserAccount = {
-    userId: "guest_bandapp_web",
-    email: "estudante@bandapp.com",
-    displayName: "Estudante BandApp",
-    role: "student",
-    createdAt: Date.now(),
-    quizzesGenerated: 2,
-    quizzesCompleted: 1,
-    averageScorePercent: 85,
-    preferredAiProvider: "Gemini 3.7 Flash",
-  };
-  localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(defaultUser));
-  return defaultUser;
+  // No active session -> returns null so app starts clean
+  return null;
 }
 
-export function saveUserSession(user: UserAccount): void {
-  localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
+export function saveUserSession(user: UserAccount, rememberMe: boolean = false): void {
+  try {
+    const userJson = JSON.stringify(user);
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem(STORAGE_KEYS.USER, userJson);
+    }
+
+    if (typeof localStorage !== "undefined") {
+      if (rememberMe) {
+        // 24 hours in milliseconds: 24 * 60 * 60 * 1000 = 86,400,000 ms
+        const expiryTimestamp = Date.now() + 24 * 60 * 60 * 1000;
+        localStorage.setItem(STORAGE_KEYS.USER, userJson);
+        localStorage.setItem(SESSION_EXPIRY_KEY, String(expiryTimestamp));
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.USER);
+        localStorage.removeItem(SESSION_EXPIRY_KEY);
+      }
+    }
+
+    // Record login timestamp transition
+    if (user.email) {
+      recordUserLoginTimestamp(user.email);
+    }
+  } catch (e) {
+    console.warn("Could not save user session:", e);
+  }
 }
+
+/**
+ * Tracks previous and current login timestamps to detect new content added between sessions
+ */
+export function recordUserLoginTimestamp(email: string): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const cleanEmail = email.trim().toLowerCase();
+    const currentKey = `bandapp_last_login_${cleanEmail}`;
+    const prevKey = `bandapp_prev_login_${cleanEmail}`;
+
+    const existingCurrent = localStorage.getItem(currentKey);
+    if (existingCurrent) {
+      // Move previous current into prevKey
+      localStorage.setItem(prevKey, existingCurrent);
+    } else {
+      // First time logging in: set previous login timestamp to 7 days ago or now
+      localStorage.setItem(prevKey, String(Date.now() - 7 * 24 * 60 * 60 * 1000));
+    }
+    // Update current session timestamp
+    localStorage.setItem(currentKey, String(Date.now()));
+  } catch (e) {
+    console.warn("Could not record login timestamp:", e);
+  }
+}
+
+export function getUserLoginTimestamps(email?: string): { prevLoginAt: number; lastLoginAt: number } {
+  try {
+    if (!email || typeof localStorage === "undefined") {
+      return { prevLoginAt: 0, lastLoginAt: Date.now() };
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const currentKey = `bandapp_last_login_${cleanEmail}`;
+    const prevKey = `bandapp_prev_login_${cleanEmail}`;
+
+    const prevRaw = localStorage.getItem(prevKey);
+    const currRaw = localStorage.getItem(currentKey);
+
+    const prevLoginAt = prevRaw ? Number(prevRaw) : Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const lastLoginAt = currRaw ? Number(currRaw) : Date.now();
+
+    return { prevLoginAt, lastLoginAt };
+  } catch {
+    return { prevLoginAt: 0, lastLoginAt: Date.now() };
+  }
+}
+
+export function getDismissedNewQuizIds(email?: string): number[] {
+  try {
+    if (!email || typeof localStorage === "undefined") return [];
+    const cleanEmail = email.trim().toLowerCase();
+    const raw = localStorage.getItem(`bandapp_dismissed_new_quizzes_${cleanEmail}`);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+export function dismissNewQuizAlert(email: string, quizIds: number[]): void {
+  try {
+    if (!email || typeof localStorage === "undefined") return;
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = getDismissedNewQuizIds(email);
+    const combined = Array.from(new Set([...existing, ...quizIds]));
+    localStorage.setItem(`bandapp_dismissed_new_quizzes_${cleanEmail}`, JSON.stringify(combined));
+  } catch (e) {
+    console.warn("Could not dismiss new quiz alert:", e);
+  }
+}
+
 
 export function clearUserSession(): void {
-  localStorage.removeItem(STORAGE_KEYS.USER);
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem(STORAGE_KEYS.USER);
+    }
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(STORAGE_KEYS.USER);
+      localStorage.removeItem(SESSION_EXPIRY_KEY);
+    }
+  } catch (e) {
+    console.warn("Could not clear user session:", e);
+  }
 }
 
 export function getCustomApiKey(providerName: string): string {

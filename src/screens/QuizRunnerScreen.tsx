@@ -18,9 +18,16 @@ import {
   Zap,
   Lock,
   X,
+  Timer,
+  Volume2,
 } from "lucide-react";
 import { Quiz, OptionLetter } from "../types";
 import { OptionCard } from "../components/OptionCard";
+import {
+  playCorrectSound,
+  playIncorrectSound,
+  playTimeoutAlertSound,
+} from "../utils/audioEffects";
 
 interface QuizRunnerScreenProps {
   quiz: Quiz;
@@ -40,32 +47,83 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState<Record<number, OptionLetter>>({});
+  // Lightning Mode (Raio): When TRUE -> Instant feedback, sound effects, and answer lock.
+  // When FALSE -> Free Mode: No sound, no answer reveal, user can freely change answers.
   const [showInstantExplanation, setShowInstantExplanation] = useState(true);
   const [showQuestionGrid, setShowQuestionGrid] = useState(false);
   const [showUnansweredWarning, setShowUnansweredWarning] = useState(false);
+  const [questionAutoAdvanceNotice, setQuestionAutoAdvanceNotice] = useState<string | null>(null);
 
-  // Timer state
-  const isTimed = quiz.timerMode === "timed" && Boolean(quiz.timerMinutes && quiz.timerMinutes > 0);
-  const initialSeconds = isTimed ? (quiz.timerMinutes || 20) * 60 : 0;
-  const [secondsRemaining, setSecondsRemaining] = useState<number>(initialSeconds);
+  // Timer configuration & normalization
+  const isTimed = quiz.timerMode === "timed";
+  const timerScope = quiz.timerScope || "general";
+  const isIndividualTimer = isTimed && timerScope === "individual";
+
+  // Compute duration in seconds (defaults: 30s per question for individual, 20m for general)
+  const configuredDurationSeconds =
+    quiz.timerSeconds && quiz.timerSeconds > 0
+      ? quiz.timerSeconds
+      : quiz.timerMinutes && quiz.timerMinutes > 0
+      ? quiz.timerMinutes * 60
+      : isIndividualTimer
+      ? 30
+      : 20 * 60;
+
+  // General countdown timer state
+  const [generalSecondsRemaining, setGeneralSecondsRemaining] = useState<number>(
+    !isIndividualTimer && isTimed ? configuredDurationSeconds : 0
+  );
+
+  // Individual per-question countdown timer state
+  const [questionSecondsRemaining, setQuestionSecondsRemaining] = useState<number>(
+    isIndividualTimer ? configuredDurationSeconds : 0
+  );
+
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [timeExpired, setTimeExpired] = useState(false);
 
   const questions = quiz.questions || [];
   const currentQuestion = questions[currentIndex];
 
+  // Scroll to top and reset question timer on question index change
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
     setShowUnansweredWarning(false);
-  }, [currentIndex]);
+    if (isIndividualTimer) {
+      setQuestionSecondsRemaining(configuredDurationSeconds);
+    }
+  }, [currentIndex, isIndividualTimer, configuredDurationSeconds]);
 
-  // Elapsed / Countdown timer effect
+  // Main countdown timer ticker
   useEffect(() => {
     if (timeExpired) return;
 
     const timer = setInterval(() => {
-      if (isTimed) {
-        setSecondsRemaining((prev) => {
+      setElapsedSeconds((prev) => prev + 1);
+
+      if (isIndividualTimer) {
+        setQuestionSecondsRemaining((prev) => {
+          if (prev <= 1) {
+            playTimeoutAlertSound();
+            // If there's another question, automatically advance
+            if (currentIndex < questions.length - 1) {
+              setQuestionAutoAdvanceNotice(
+                `Tempo esgotado na Questão ${currentIndex + 1}! Avançando automaticamente...`
+              );
+              setTimeout(() => setQuestionAutoAdvanceNotice(null), 2500);
+              setCurrentIndex((idx) => Math.min(questions.length - 1, idx + 1));
+              return configuredDurationSeconds;
+            } else {
+              // Reached end of quiz via individual timer
+              clearInterval(timer);
+              setTimeExpired(true);
+              return 0;
+            }
+          }
+          return prev - 1;
+        });
+      } else if (isTimed) {
+        setGeneralSecondsRemaining((prev) => {
           if (prev <= 1) {
             clearInterval(timer);
             setTimeExpired(true);
@@ -74,13 +132,19 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
           return prev - 1;
         });
       }
-      setElapsedSeconds((prev) => prev + 1);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isTimed, timeExpired]);
+  }, [
+    isTimed,
+    isIndividualTimer,
+    timeExpired,
+    currentIndex,
+    questions.length,
+    configuredDurationSeconds,
+  ]);
 
-  // Auto-finish on timer expiration
+  // Auto-finish on general or last-question timer expiration
   useEffect(() => {
     if (timeExpired) {
       handleFinish();
@@ -93,7 +157,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
         <p>Nenhuma questão encontrada neste questionário.</p>
         <button
           onClick={onNavigateBack}
-          className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs"
+          className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs cursor-pointer"
         >
           Voltar
         </button>
@@ -116,21 +180,32 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
     selectedAnswer.toUpperCase() === currentQuestion.correctOption.toUpperCase();
 
   const handleSelectOption = (letter: OptionLetter) => {
+    // In Lightning Mode (showInstantExplanation === true), if already selected, selection is LOCKED!
+    if (showInstantExplanation && userAnswers[currentIndex] !== undefined) {
+      return;
+    }
+
     setShowUnansweredWarning(false);
     const isCorrect = letter.toUpperCase() === currentQuestion.correctOption.toUpperCase();
 
-    // Trigger celebratory micro-confetti on correct answer
-    if (showInstantExplanation && isCorrect) {
-      try {
-        confetti({
-          particleCount: 22,
-          spread: 55,
-          origin: { y: 0.65 },
-          colors: ["#10b981", "#34d399", "#fbbf24", "#6366f1"],
-        });
-      } catch {}
+    // Sound & Confetti feedback ONLY when Lightning Mode is active
+    if (showInstantExplanation) {
+      if (isCorrect) {
+        playCorrectSound();
+        try {
+          confetti({
+            particleCount: 24,
+            spread: 60,
+            origin: { y: 0.65 },
+            colors: ["#10b981", "#34d399", "#fbbf24", "#6366f1"],
+          });
+        } catch {}
+      } else {
+        playIncorrectSound();
+      }
     }
 
+    // In Free Mode or on first pick in Lightning Mode, update selected answer
     setUserAnswers((prev) => ({
       ...prev,
       [currentIndex]: letter,
@@ -158,7 +233,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   };
 
   const handleJumpToQuestion = (targetIdx: number) => {
-    // If attempting to jump forward past unanswered questions, block and guide
+    // If attempting to jump forward past unanswered questions, guide user
     if (targetIdx > currentIndex) {
       for (let i = 0; i <= currentIndex; i++) {
         if (!userAnswers[i]) {
@@ -192,8 +267,11 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
 
     const percent = questions.length > 0 ? Math.round((correct / questions.length) * 100) : 0;
     const timeSpent = isTimed
-      ? Math.max(1, initialSeconds - secondsRemaining)
+      ? !isIndividualTimer
+        ? Math.max(1, configuredDurationSeconds - generalSecondsRemaining)
+        : Math.max(1, elapsedSeconds)
       : Math.max(1, elapsedSeconds);
+
     onFinishQuiz(percent, correct, userAnswers, timeSpent);
   };
 
@@ -221,46 +299,77 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
           </button>
 
           <div className="flex items-center gap-2">
+            {/* Timer Display */}
             {isTimed ? (
-              <div
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-mono font-bold ${
-                  secondsRemaining < 60
-                    ? "bg-rose-950/70 border-rose-500/50 text-rose-300 animate-pulse"
-                    : secondsRemaining < 300
-                    ? "bg-amber-950/60 border-amber-500/40 text-amber-300"
-                    : "bg-indigo-950/60 border-indigo-500/30 text-indigo-300"
-                }`}
-              >
-                <Clock className="w-3.5 h-3.5" />
-                <span>{formatTimer(secondsRemaining)}</span>
-              </div>
+              isIndividualTimer ? (
+                <div
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-mono font-bold transition-colors ${
+                    questionSecondsRemaining <= 5
+                      ? "bg-rose-950/80 border-rose-500/60 text-rose-300 animate-pulse"
+                      : questionSecondsRemaining <= 10
+                      ? "bg-amber-950/70 border-amber-500/50 text-amber-300"
+                      : "bg-indigo-950/60 border-indigo-500/30 text-indigo-300"
+                  }`}
+                  title="Tempo individual para esta pergunta"
+                >
+                  <Timer className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{formatTimer(questionSecondsRemaining)}</span>
+                  <span className="text-[10px] text-amber-300/80 font-sans font-normal">/questão</span>
+                </div>
+              ) : (
+                <div
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-mono font-bold ${
+                    generalSecondsRemaining < 60
+                      ? "bg-rose-950/70 border-rose-500/50 text-rose-300 animate-pulse"
+                      : generalSecondsRemaining < 300
+                      ? "bg-amber-950/60 border-amber-500/40 text-amber-300"
+                      : "bg-indigo-950/60 border-indigo-500/30 text-indigo-300"
+                  }`}
+                  title="Tempo total restante para todo o questionário"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{formatTimer(generalSecondsRemaining)}</span>
+                  <span className="text-[10px] text-slate-400 font-sans font-normal">total</span>
+                </div>
+              )
             ) : (
-              <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
+              <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
                 <Clock className="w-3 h-3 text-slate-500" />
                 <span>Tempo Livre</span>
               </div>
             )}
 
-            {/* Instant Feedback Mode Switch */}
+            {/* Lightning Mode (Raio) Switch Button - Matching Screenshot */}
             <button
               type="button"
               id="toggle-instant-feedback-btn"
               onClick={() => setShowInstantExplanation(!showInstantExplanation)}
-              className={`px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer font-bold ${
+              className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition-all cursor-pointer font-bold ${
                 showInstantExplanation
-                  ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 shadow-xs"
+                  ? "bg-emerald-950/60 text-emerald-300 border-emerald-500/60 ring-1 ring-emerald-500/40 shadow-md shadow-emerald-950/50"
                   : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
               }`}
-              title="Alternar feedback visual imediato após selecionar opção"
+              title={
+                showInstantExplanation
+                  ? "Modo Raio ATIVO: Feedback imediato com som e trava de resposta. Clique para alternar para Modo Livre."
+                  : "Modo Livre ATIVO: Sem som ou gabarito imediato. Você pode alterar suas respostas livremente. Clique para ativar Modo Raio."
+              }
             >
-              <Zap className={`w-3.5 h-3.5 ${showInstantExplanation ? "text-emerald-400 fill-emerald-400" : "text-slate-500"}`} />
+              <Zap
+                className={`w-4 h-4 transition-transform duration-200 ${
+                  showInstantExplanation
+                    ? "text-emerald-400 fill-emerald-400 scale-110 drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                    : "text-slate-500"
+                }`}
+              />
               <span className="hidden sm:inline">
-                {showInstantExplanation ? "Feedback Imediato" : "Modo Simulado"}
+                {showInstantExplanation ? "Modo Raio" : "Modo Livre"}
               </span>
             </button>
           </div>
         </div>
 
+        {/* Top Progress bar */}
         <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
           <div
             className="bg-gradient-to-r from-indigo-500 to-amber-400 h-2 rounded-full transition-all duration-200"
@@ -268,6 +377,14 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
           />
         </div>
       </div>
+
+      {/* Auto-Advance Notification Toast for Individual Timer */}
+      {questionAutoAdvanceNotice && (
+        <div className="p-3 rounded-2xl bg-amber-950/80 border border-amber-500 text-amber-200 text-xs flex items-center gap-2.5 animate-in fade-in zoom-in duration-200">
+          <Timer className="w-4 h-4 text-amber-400 shrink-0 animate-spin" />
+          <span className="font-bold">{questionAutoAdvanceNotice}</span>
+        </div>
+      )}
 
       {/* Time Expired Notice */}
       {timeExpired && (
@@ -405,15 +522,27 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Selecione a alternativa correta:
+            {showInstantExplanation
+              ? "Selecione a alternativa correta:"
+              : "Selecione a alternativa (você pode alterar sua resposta livremente):"}
           </p>
-          {showInstantFeedbackIndicator(selectedAnswer, isCurrentSelectionCorrect)}
+          {showInstantExplanation ? (
+            showInstantFeedbackIndicator(selectedAnswer, isCurrentSelectionCorrect)
+          ) : selectedAnswer ? (
+            <span className="text-[11px] text-indigo-300 font-bold flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-indigo-400" />
+              Alternativa {selectedAnswer} marcada
+            </span>
+          ) : null}
         </div>
 
         <div className="grid gap-2.5">
           {options.map((opt) => {
             const isSelected = selectedAnswer === opt.letter;
             const isCorrect = opt.letter.toUpperCase() === currentQuestion.correctOption.toUpperCase();
+            // In Raio mode: Once an answer has been chosen for this question, LOCK all options
+            // In Free mode: Never disabled, user can change answer at any time
+            const isOptionLocked = showInstantExplanation && selectedAnswer !== undefined;
 
             return (
               <OptionCard
@@ -423,6 +552,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
                 isSelected={isSelected}
                 isCorrect={isCorrect}
                 showResult={showInstantExplanation && selectedAnswer !== undefined}
+                disabled={isOptionLocked}
                 onClick={() => handleSelectOption(opt.letter)}
               />
             );
@@ -430,7 +560,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
         </div>
       </div>
 
-      {/* Dynamic Explanation & Rationale Box */}
+      {/* Dynamic Explanation & Rationale Box - ONLY shown when Lightning Mode (Raio) is active */}
       <AnimatePresence mode="wait">
         {showInstantExplanation && selectedAnswer && (
           <motion.div
@@ -557,7 +687,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   );
 };
 
-// Helper for top status badge
+// Helper for top status badge in instant mode
 function showInstantFeedbackIndicator(
   selectedAnswer?: OptionLetter,
   isCorrect?: boolean
@@ -576,3 +706,4 @@ function showInstantFeedbackIndicator(
     </span>
   );
 }
+

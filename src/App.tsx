@@ -185,7 +185,7 @@ export default function App() {
   // If not logged in, always render AuthScreen
   if (!currentUser) {
     return (
-      <div className={`min-h-screen ${theme === "light" ? "theme-light light bg-slate-50 text-slate-900" : "dark bg-slate-950 text-slate-100"} antialiased font-sans flex flex-col`}>
+      <div className={`min-h-screen w-full max-w-full overflow-x-hidden ${theme === "light" ? "theme-light light bg-slate-50 text-slate-900" : "dark bg-slate-950 text-slate-100"} antialiased font-sans flex flex-col`}>
         <AuthScreen
           onAuthSuccess={async (user) => {
             setCurrentUser(user);
@@ -235,7 +235,7 @@ export default function App() {
   }
 
   return (
-    <div className={`min-h-screen ${theme === "light" ? "theme-light light" : "dark"} bg-slate-950 text-slate-100 antialiased font-sans flex flex-col selection:bg-indigo-500 selection:text-white transition-colors duration-200`}>
+    <div className={`min-h-screen w-full max-w-full overflow-x-hidden ${theme === "light" ? "theme-light light" : "dark"} bg-slate-950 text-slate-100 antialiased font-sans flex flex-col selection:bg-indigo-500 selection:text-white transition-colors duration-200`}>
       {activeScreen !== "auth" && (
         <Header
           title={headerTitle}

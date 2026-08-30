@@ -23,9 +23,13 @@ import {
   Sparkles,
   Lock,
   FileCheck,
+  Share2,
+  Download,
+  Image as ImageIcon,
 } from "lucide-react";
 import { Quiz, OptionLetter, UserAccount } from "../types";
 import { exportQuizResultToPdf } from "../utils/pdfExport";
+import { generatePerformanceCardImageBlob } from "../utils/performanceCardGenerator";
 
 interface QuizResultScreenProps {
   quiz: Quiz;
@@ -54,6 +58,15 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
   const [copied, setCopied] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pdfSuccess, setPdfSuccess] = useState(false);
+
+  // Social Performance Card State
+  const [isGeneratingCard, setIsGeneratingCard] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [cardDataUrl, setCardDataUrl] = useState<string | null>(null);
+  const [cardBlob, setCardBlob] = useState<Blob | null>(null);
+  const [cardCopied, setCardCopied] = useState(false);
+  const [cardDownloadSuccess, setCardDownloadSuccess] = useState(false);
+  const [shareFeedbackMsg, setShareFeedbackMsg] = useState<string | null>(null);
   
   // Default filter to errors if the user had mistakes, so they can immediately review them
   const questions = quiz.questions || [];
@@ -145,6 +158,91 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
     a.download = `${quiz.title.replace(/\s+/g, "_")}_gabarito.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleGenerateAndOpenShareCard = async () => {
+    try {
+      setIsGeneratingCard(true);
+      const { blob, dataUrl } = await generatePerformanceCardImageBlob({
+        quiz,
+        scorePercent,
+        correctCount,
+        totalQuestions,
+        user: currentUser,
+        completionDate: new Date(),
+      });
+      setCardBlob(blob);
+      setCardDataUrl(dataUrl);
+      setIsShareModalOpen(true);
+    } catch (err) {
+      console.error("Erro ao gerar cartão de desempenho:", err);
+    } finally {
+      setIsGeneratingCard(false);
+    }
+  };
+
+  const handleDownloadCard = () => {
+    if (!cardDataUrl) return;
+    const a = document.createElement("a");
+    a.href = cardDataUrl;
+    a.download = `${quiz.title.replace(/[\s/\\?%*:|"<>]+/g, "_")}_Desempenho_BandApp.png`;
+    a.click();
+    setCardDownloadSuccess(true);
+    setTimeout(() => setCardDownloadSuccess(false), 3000);
+  };
+
+  const handleDirectShare = async () => {
+    if (!cardBlob) {
+      handleDownloadCard();
+      return;
+    }
+
+    const fileName = `Desempenho_${quiz.title.slice(0, 20).replace(/[\s/\\?%*:|"<>]+/g, "_")}.png`;
+    const file = new File([cardBlob], fileName, { type: "image/png" });
+
+    // Check if Web Share API with files is supported
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          title: `Meu Desempenho no BandApp: ${quiz.title}`,
+          text: `Concluí a avaliação "${quiz.title}" no BandApp com ${scorePercent}% de aproveitamento (${correctCount}/${totalQuestions} acertos)!`,
+          files: [file],
+        });
+        setShareFeedbackMsg("Compartilhado com sucesso!");
+        setTimeout(() => setShareFeedbackMsg(null), 3000);
+        return;
+      } catch (err: any) {
+        if (err.name !== "AbortError") {
+          console.warn("Erro ao usar Web Share:", err);
+        }
+      }
+    }
+
+    // Fallback: automatic download if Web Share was not available/aborted
+    handleDownloadCard();
+    setShareFeedbackMsg("Imagem baixada! Você pode anexá-la em suas redes sociais.");
+    setTimeout(() => setShareFeedbackMsg(null), 3500);
+  };
+
+  const handleCopyCardImage = async () => {
+    if (!cardBlob) return;
+    try {
+      if (navigator.clipboard && typeof ClipboardItem !== "undefined") {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "image/png": cardBlob,
+          }),
+        ]);
+        setCardCopied(true);
+        setTimeout(() => setCardCopied(false), 2500);
+      } else {
+        // Fallback to downloading
+        handleDownloadCard();
+      }
+    } catch (err) {
+      console.warn("Não foi possível copiar imagem diretamente:", err);
+      handleDownloadCard();
+    }
   };
 
   // Filter questions according to user selection
@@ -244,6 +342,30 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
                 <BookOpen className="w-3 h-3 text-indigo-400" />
                 Todas
               </p>
+            </button>
+          </div>
+
+          {/* Social Share Card Button */}
+          <div className="pt-3 max-w-sm mx-auto">
+            <button
+              type="button"
+              id="generate-share-card-btn"
+              onClick={handleGenerateAndOpenShareCard}
+              disabled={isGeneratingCard}
+              className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-500 via-indigo-600 to-indigo-700 hover:from-amber-400 hover:to-indigo-500 active:scale-98 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-950/50 transition-all cursor-pointer disabled:opacity-60"
+            >
+              {isGeneratingCard ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                  <span>Gerando Imagem em Alta Resolução...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                  <span>Gerar Cartão para Redes Sociais</span>
+                  <Share2 className="w-4 h-4 ml-0.5 text-white/90" />
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -378,6 +500,23 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
                   <span>TXT Desativado</span>
                 </div>
               )}
+
+              {/* Social Share Card Quick Button */}
+              <button
+                type="button"
+                id="export-social-card-btn"
+                onClick={handleGenerateAndOpenShareCard}
+                disabled={isGeneratingCard}
+                className="px-3 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                title="Gerar imagem do cartão de desempenho para redes sociais"
+              >
+                {isGeneratingCard ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                ) : (
+                  <ImageIcon className="w-4 h-4 text-amber-400" />
+                )}
+                <span>Cartão Imagem</span>
+              </button>
             </div>
           </div>
         );
@@ -853,6 +992,121 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Social Performance Card Preview & Share Modal */}
+      {isShareModalOpen && cardDataUrl && (
+        <div
+          id="social-share-modal-backdrop"
+          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-in fade-in duration-200"
+          onClick={() => setIsShareModalOpen(false)}
+        >
+          <div
+            id="social-share-modal-container"
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 my-auto animate-in zoom-in-95 duration-200"
+          >
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center justify-center shrink-0 shadow-inner">
+                  <Sparkles className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white leading-tight">
+                    Cartão de Desempenho Oficial
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Imagem em alta resolução (16:9) pronta para compartilhar no WhatsApp, Stories e Redes.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="close-share-modal-btn"
+                onClick={() => setIsShareModalOpen(false)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer border border-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* High-Res Image Preview */}
+            <div className="relative rounded-2xl overflow-hidden border border-slate-800 bg-slate-950/90 shadow-2xl p-1">
+              <img
+                id="preview-performance-card-img"
+                src={cardDataUrl}
+                alt={`Desempenho no Quiz ${quiz.title}`}
+                className="w-full h-auto object-contain rounded-xl max-h-[48vh] mx-auto block shadow-lg"
+              />
+            </div>
+
+            {/* Feedback Notifications */}
+            {shareFeedbackMsg && (
+              <div className="p-3 rounded-xl bg-indigo-950/50 border border-indigo-500/40 text-xs font-bold text-indigo-300 flex items-center gap-2 animate-in fade-in duration-200">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{shareFeedbackMsg}</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-2">
+              <button
+                type="button"
+                id="share-card-direct-btn"
+                onClick={handleDirectShare}
+                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 active:scale-95 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>Compartilhar (WhatsApp / Redes)</span>
+              </button>
+
+              <button
+                type="button"
+                id="download-card-png-btn"
+                onClick={handleDownloadCard}
+                className={`py-3 px-4 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                  cardDownloadSuccess
+                    ? "bg-emerald-600 border-emerald-500 text-white"
+                    : "bg-indigo-600 hover:bg-indigo-500 border-indigo-500 text-white shadow-md shadow-indigo-600/30"
+                }`}
+              >
+                {cardDownloadSuccess ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-200" />
+                    <span>Baixado!</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    <span>Baixar PNG</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                id="copy-card-img-btn"
+                onClick={handleCopyCardImage}
+                title="Copiar imagem para a área de transferência"
+                className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer border border-slate-700"
+              >
+                {cardCopied ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span>Copiado!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4 text-slate-400" />
+                    <span>Copiar</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
