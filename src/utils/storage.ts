@@ -1,4 +1,5 @@
 import { Quiz, Question, UserAccount, DocumentHistoryItem, AppTheme, QuizAttemptRecord, LeaderboardEntry } from "../types";
+import { getPointsPerQuestion } from "./scoring";
 
 const STORAGE_KEYS = {
   QUIZZES: "bandapp_quizzes_v1",
@@ -459,6 +460,57 @@ export function getStoredQuizAttempts(userEmail?: string): QuizAttemptRecord[] {
   }
 }
 
+export function clearQuizAttemptsFromStorage(quizId?: number): void {
+  try {
+    if (quizId !== undefined) {
+      const existing = getStoredQuizAttempts();
+      const filtered = existing.filter((a) => a.quizId !== quizId);
+      localStorage.setItem(STORAGE_KEYS.QUIZ_ATTEMPTS, JSON.stringify(filtered));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.QUIZ_ATTEMPTS);
+    }
+  } catch (e) {
+    console.warn("Could not clear quiz attempts from local storage:", e);
+  }
+}
+
+export function resetQuizStatisticsInStorage(quizId: number): void {
+  try {
+    const quizzes = getStoredQuizzes();
+    const updated = quizzes.map((q) => {
+      if (q.id === quizId) {
+        return {
+          ...q,
+          totalAnswered: 0,
+          lastScorePercent: 0,
+          lastCompletedAt: 0,
+        };
+      }
+      return q;
+    });
+    localStorage.setItem(STORAGE_KEYS.QUIZ_ATTEMPTS, JSON.stringify(getStoredQuizAttempts().filter(a => a.quizId !== quizId)));
+    localStorage.setItem(STORAGE_KEYS.QUIZZES, JSON.stringify(updated));
+  } catch (e) {
+    console.warn("Could not reset quiz statistics in storage:", e);
+  }
+}
+
+export function resetAllQuizzesStatisticsInStorage(): void {
+  try {
+    const quizzes = getStoredQuizzes();
+    const updated = quizzes.map((q) => ({
+      ...q,
+      totalAnswered: 0,
+      lastScorePercent: 0,
+      lastCompletedAt: 0,
+    }));
+    localStorage.removeItem(STORAGE_KEYS.QUIZ_ATTEMPTS);
+    localStorage.setItem(STORAGE_KEYS.QUIZZES, JSON.stringify(updated));
+  } catch (e) {
+    console.warn("Could not reset all quiz statistics in storage:", e);
+  }
+}
+
 export function saveQuizAttempt(record: QuizAttemptRecord): void {
   try {
     // Enforce isCompleted flag
@@ -494,23 +546,29 @@ export function getLeaderboardEntries(
         ? Math.round(userAttempts.reduce((acc, a) => acc + a.timeSpentSeconds, 0) / userCompleted)
         : 0;
 
-    // Gamified point system:
-    // 50 pts per correct answer + 100 pts completion bonus + 200 pts bonus for scores >= 80%
-    const highScoresBonus = userAttempts.filter((a) => a.scorePercent >= 80).length * 200;
-    const userPoints = userCorrect * 50 + userCompleted * 100 + highScoresBonus;
+    // Gamified point system based on official question scale:
+    // +0.5 pts (40 questions), +0.4 pts (50 questions), +0.2 pts (100 questions),
+    // +0.13 pts (150 questions), +0.1 pts (200 questions)
+    const earnedPointsFromQuestions = userAttempts.reduce((acc, a) => {
+      const perQ = getPointsPerQuestion(a.totalQuestions || 50);
+      return acc + (a.correctCount * perQ);
+    }, 0);
+    const completionBonus = userCompleted * 5;
+    const highScoresBonus = userAttempts.filter((a) => a.scorePercent >= 80).length * 10;
+    const userPoints = Math.round((earnedPointsFromQuestions + completionBonus + highScoresBonus) * 10) / 10;
 
     let userTier: "Diamante" | "Ouro" | "Prata" | "Bronze" | "Aspirante" = "Aspirante";
-    if (userPoints >= 4000) userTier = "Diamante";
-    else if (userPoints >= 2800) userTier = "Ouro";
-    else if (userPoints >= 1800) userTier = "Prata";
-    else if (userPoints >= 1000) userTier = "Bronze";
+    if (userPoints >= 150) userTier = "Diamante";
+    else if (userPoints >= 90) userTier = "Ouro";
+    else if (userPoints >= 50) userTier = "Prata";
+    else if (userPoints >= 20) userTier = "Bronze";
     else userTier = "Aspirante";
 
     let userBadge = "Participante Ativo";
     if (userAvgScore >= 90 && userCompleted > 0) userBadge = "Mente Brilhante";
     else if (userAvgScore >= 80 && userCompleted > 0) userBadge = "Alto Rendimento";
     else if (userCompleted >= 10) userBadge = "Maratonista de Quizzes";
-    else if (userPoints >= 2500) userBadge = "Especialista BandApp";
+    else if (userPoints >= 100) userBadge = "Especialista BandApp";
     else if (userCompleted === 0) userBadge = "Iniciante";
 
     const currentUserEntry: Omit<LeaderboardEntry, "rank"> = {

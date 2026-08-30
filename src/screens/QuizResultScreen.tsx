@@ -30,6 +30,12 @@ import {
 import { Quiz, OptionLetter, UserAccount } from "../types";
 import { exportQuizResultToPdf } from "../utils/pdfExport";
 import { generatePerformanceCardImageBlob } from "../utils/performanceCardGenerator";
+import {
+  calculateQuizPoints,
+  formatQuizPoints,
+  getPointsPerQuestion,
+  getQuizPhaseInfo,
+} from "../utils/scoring";
 
 interface QuizResultScreenProps {
   quiz: Quiz;
@@ -75,6 +81,25 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
   
   const [filter, setFilter] = useState<QuestionFilter>(errorCount > 0 ? "errors" : "all");
   const [viewMode, setViewMode] = useState<ViewMode>("side-by-side");
+
+  const pointsPerQ = getPointsPerQuestion(totalQuestions);
+  const earnedPoints = calculateQuizPoints(totalQuestions, correctCount);
+  const phaseInfo = getQuizPhaseInfo(totalQuestions);
+
+  // Phase breakdown for 2-phase quizzes
+  const phase1Questions = questions.slice(0, 100);
+  const phase2Questions = questions.slice(100);
+  const phase1Correct = phase1Questions.filter((q, idx) => {
+    const chosen = userAnswers[idx];
+    return chosen && chosen.toUpperCase() === q.correctOption.toUpperCase();
+  }).length;
+  const phase2Correct = phase2Questions.filter((q, offsetIdx) => {
+    const actualIdx = 100 + offsetIdx;
+    const chosen = userAnswers[actualIdx];
+    return chosen && chosen.toUpperCase() === q.correctOption.toUpperCase();
+  }).length;
+  const phase1Points = Math.round(phase1Correct * pointsPerQ * 100) / 100;
+  const phase2Points = Math.round(phase2Correct * pointsPerQ * 100) / 100;
 
   useEffect(() => {
     if (scorePercent >= 70) {
@@ -343,6 +368,50 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
                 Todas
               </p>
             </button>
+          </div>
+
+          {/* Points Earned & Phase Breakdown Card */}
+          <div className="max-w-md mx-auto p-4 rounded-3xl bg-slate-950/80 border border-slate-800 space-y-3 text-left shadow-inner">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                  <Trophy className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-extrabold text-white">Pontuação Conquistada</h4>
+                  <p className="text-[10px] text-slate-400">Escala de {formatQuizPoints(pointsPerQ)} pts por acerto</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-lg font-black text-amber-400">+{formatQuizPoints(earnedPoints)}</span>
+                <span className="text-[10px] text-slate-400 ml-1">pts</span>
+              </div>
+            </div>
+
+            {/* If 2 phases, display phase-by-phase breakdown */}
+            {phaseInfo.hasPhases && (
+              <div className="pt-2 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-xs">
+                <div className="p-2.5 rounded-2xl bg-slate-900/90 border border-slate-800">
+                  <div className="flex items-center justify-between text-slate-400 text-[10px] uppercase font-bold">
+                    <span>Fase 1 (100 Qs)</span>
+                    <span className="text-indigo-300 font-extrabold">+{formatQuizPoints(phase1Points)} pts</span>
+                  </div>
+                  <p className="text-white font-extrabold mt-0.5 text-xs">
+                    {phase1Correct} / 100 acertos
+                  </p>
+                </div>
+
+                <div className="p-2.5 rounded-2xl bg-slate-900/90 border border-slate-800">
+                  <div className="flex items-center justify-between text-slate-400 text-[10px] uppercase font-bold">
+                    <span>Fase 2 ({totalQuestions - 100} Qs)</span>
+                    <span className="text-indigo-300 font-extrabold">+{formatQuizPoints(phase2Points)} pts</span>
+                  </div>
+                  <p className="text-white font-extrabold mt-0.5 text-xs">
+                    {phase2Correct} / {totalQuestions - 100} acertos
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Social Share Card Button */}

@@ -35,6 +35,7 @@ import {
   EyeOff,
   Eye,
   Undo2,
+  FilePlus2,
 } from "lucide-react";
 import {
   Quiz,
@@ -48,6 +49,7 @@ import {
 } from "../types";
 import { StatCard } from "../components/StatCard";
 import { StudentProgressChart } from "../components/StudentProgressChart";
+import { AppendJsonModal } from "../components/AppendJsonModal";
 import {
   getStoredQuizAttempts,
   getUserLoginTimestamps,
@@ -70,6 +72,7 @@ interface HomeScreenProps {
   onNavigate: (screen: ActiveScreen) => void;
   onDeleteQuiz: (quizId: number) => void;
   onUpdateQuizSettings?: (quizId: number, updates: Partial<Quiz>) => void;
+  onRefreshQuizzes?: () => void;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -82,11 +85,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onNavigate,
   onDeleteQuiz,
   onUpdateQuizSettings,
+  onRefreshQuizzes,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>("Todos");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [quizToDelete, setQuizToDelete] = useState<Quiz | null>(null);
   const [quizToEditSettings, setQuizToEditSettings] = useState<Quiz | null>(null);
+  const [quizToAppendJson, setQuizToAppendJson] = useState<Quiz | null>(null);
   
   // Settings edit modal state
   const [editIsPublic, setEditIsPublic] = useState(true);
@@ -671,6 +676,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       <div className="flex items-center gap-0.5 shrink-0">
                         <button
                           type="button"
+                          id={`append-json-quiz-${quiz.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setQuizToAppendJson(quiz);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 rounded-xl transition-colors cursor-pointer"
+                          title="Acrescentar Perguntas (.JSON)"
+                        >
+                          <FilePlus2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleOpenSettingsModal(quiz);
@@ -1150,139 +1167,41 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     </button>
                   </div>
 
-                  {/* Unit & Value */}
+                  {/* Unit & Value with Input + Combobox */}
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-400 font-semibold text-[11px]">Unidade:</span>
-                      <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditTimerUnit("seconds");
-                            if (editTimerValue > 300) setEditTimerValue(30);
+                    <label className="text-[11px] font-bold text-slate-300">
+                      Unidade e Duração:
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-medium">Duração:</span>
+                        <input
+                          id="edit-quiz-timer-value-input"
+                          type="number"
+                          min={1}
+                          max={editTimerUnit === "seconds" ? 3600 : editTimerUnit === "minutes" ? 720 : 72}
+                          value={editTimerValue}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setEditTimerValue(isNaN(val) ? 1 : Math.max(1, val));
                           }}
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
-                            editTimerUnit === "seconds" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white"
-                          }`}
-                        >
-                          Segundos (s)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditTimerUnit("minutes");
-                            if (editTimerValue > 180) setEditTimerValue(20);
-                          }}
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
-                            editTimerUnit === "minutes" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white"
-                          }`}
-                        >
-                          Minutos (min)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditTimerUnit("hours");
-                            if (editTimerValue > 12) setEditTimerValue(1);
-                          }}
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
-                            editTimerUnit === "hours" ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white"
-                          }`}
-                        >
-                          Horas (h)
-                        </button>
+                          placeholder="Ex: 30"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold text-xs focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                        />
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={1}
-                        max={editTimerUnit === "seconds" ? 3600 : editTimerUnit === "minutes" ? 180 : 24}
-                        value={editTimerValue}
-                        onChange={(e) => setEditTimerValue(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="w-24 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-white font-bold text-xs focus:outline-hidden focus:border-amber-500"
-                      />
-
-                      <div className="flex items-center gap-1 flex-wrap flex-1">
-                        {editTimerScope === "individual" ? (
-                          editTimerUnit === "seconds" ? (
-                            [15, 30, 45, 60, 90].map((v) => (
-                              <button
-                                key={v}
-                                type="button"
-                                onClick={() => setEditTimerValue(v)}
-                                className={`px-2 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
-                                  editTimerValue === v
-                                    ? "bg-amber-600 text-white"
-                                    : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
-                                }`}
-                              >
-                                {v}s
-                              </button>
-                            ))
-                          ) : (
-                            [1, 2, 3, 5].map((v) => (
-                              <button
-                                key={v}
-                                type="button"
-                                onClick={() => setEditTimerValue(v)}
-                                className={`px-2 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
-                                  editTimerValue === v
-                                    ? "bg-amber-600 text-white"
-                                    : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
-                                }`}
-                              >
-                                {v}m
-                              </button>
-                            ))
-                          )
-                        ) : editTimerUnit === "minutes" ? (
-                          [5, 10, 15, 20, 30, 45, 60].map((v) => (
-                            <button
-                              key={v}
-                              type="button"
-                              onClick={() => setEditTimerValue(v)}
-                              className={`px-2 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
-                                editTimerValue === v
-                                  ? "bg-amber-600 text-white"
-                                  : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
-                              }`}
-                            >
-                              {v}m
-                            </button>
-                          ))
-                        ) : editTimerUnit === "hours" ? (
-                          [1, 2, 3].map((v) => (
-                            <button
-                              key={v}
-                              type="button"
-                              onClick={() => setEditTimerValue(v)}
-                              className={`px-2 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
-                                editTimerValue === v
-                                  ? "bg-amber-600 text-white"
-                                  : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
-                              }`}
-                            >
-                              {v}h
-                            </button>
-                          ))
-                        ) : (
-                          [30, 60, 120, 300].map((v) => (
-                            <button
-                              key={v}
-                              type="button"
-                              onClick={() => setEditTimerValue(v)}
-                              className={`px-2 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
-                                editTimerValue === v
-                                  ? "bg-amber-600 text-white"
-                                  : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
-                              }`}
-                            >
-                              {v}s
-                            </button>
-                          ))
-                        )}
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-medium">Unidade:</span>
+                        <select
+                          id="edit-quiz-timer-unit-select"
+                          value={editTimerUnit}
+                          onChange={(e) => setEditTimerUnit(e.target.value as "seconds" | "minutes" | "hours")}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold text-xs focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                        >
+                          <option value="seconds" className="bg-slate-900 text-white">Segundo(s)</option>
+                          <option value="minutes" className="bg-slate-900 text-white">Minuto(s)</option>
+                          <option value="hours" className="bg-slate-900 text-white">Hora(s)</option>
+                        </select>
                       </div>
                     </div>
                   </div>
@@ -1310,6 +1229,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Append Questions via JSON Modal */}
+      {quizToAppendJson && (
+        <AppendJsonModal
+          quiz={quizToAppendJson}
+          currentUserRole={currentUserRole}
+          onClose={() => setQuizToAppendJson(null)}
+          onSuccess={(_updatedQuiz, _addedCount, _duplicateCount) => {
+            if (onRefreshQuizzes) {
+              onRefreshQuizzes();
+            }
+          }}
+          onStartQuiz={(quizId) => {
+            onStartQuiz(quizId);
+          }}
+        />
       )}
     </div>
   );

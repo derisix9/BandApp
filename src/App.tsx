@@ -284,6 +284,7 @@ export default function App() {
             }}
             onDeleteQuiz={handleDeleteQuiz}
             onUpdateQuizSettings={handleUpdateQuizSettings}
+            onRefreshQuizzes={refreshQuizzes}
           />
         )}
 
@@ -292,6 +293,7 @@ export default function App() {
             categories={categories}
             currentUserRole={currentUser.role}
             currentUserEmail={currentUser.email}
+            quizzes={quizzes}
             onQuizCreated={handleQuizCreated}
             onNavigateBack={() => setActiveScreen("home")}
             onAddCategory={handleAddCategory}

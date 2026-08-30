@@ -28,6 +28,12 @@ import {
   playIncorrectSound,
   playTimeoutAlertSound,
 } from "../utils/audioEffects";
+import {
+  getPointsPerQuestion,
+  getQuizPhaseInfo,
+  getCurrentPhase,
+  formatQuizPoints,
+} from "../utils/scoring";
 
 interface QuizRunnerScreenProps {
   quiz: Quiz;
@@ -54,6 +60,13 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   const [showUnansweredWarning, setShowUnansweredWarning] = useState(false);
   const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const [questionAutoAdvanceNotice, setQuestionAutoAdvanceNotice] = useState<string | null>(null);
+  const [showPhaseTransitionModal, setShowPhaseTransitionModal] = useState(false);
+  const [selectedGridPhase, setSelectedGridPhase] = useState<1 | 2>(1);
+
+  const questions = quiz.questions || [];
+  const pointsPerQuestion = getPointsPerQuestion(questions.length);
+  const phaseInfo = getQuizPhaseInfo(questions.length);
+  const currentPhase = getCurrentPhase(currentIndex, questions.length);
 
   // Timer configuration & normalization
   const isTimed = quiz.timerMode === "timed";
@@ -83,7 +96,6 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [timeExpired, setTimeExpired] = useState(false);
 
-  const questions = quiz.questions || [];
   const currentQuestion = questions[currentIndex];
 
   // Scroll to top and reset question timer on question index change
@@ -221,9 +233,22 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
     }
 
     setShowUnansweredWarning(false);
+
+    // If completing the last question of Phase 1 (index 99) in a 2-phase quiz, show celebration & transition modal
+    if (phaseInfo.hasPhases && currentIndex === 99 && !userAnswers[100]) {
+      setShowPhaseTransitionModal(true);
+      return;
+    }
+
     if (currentIndex < questions.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     }
+  };
+
+  const handleStartPhase2 = () => {
+    setShowPhaseTransitionModal(false);
+    setCurrentIndex(100);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handlePrevious = () => {
@@ -285,6 +310,31 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
 
   return (
     <div id="quiz-runner-screen" className="max-w-3xl mx-auto px-4 py-6 pb-28 space-y-6">
+      {/* Top Banner: Phase & Points Per Question Scale */}
+      <div className="flex items-center justify-between gap-2 flex-wrap text-xs bg-slate-900/90 border border-slate-800 p-2.5 rounded-2xl">
+        <div className="flex items-center gap-2 flex-wrap">
+          {phaseInfo.hasPhases ? (
+            <span className="px-2.5 py-1 rounded-xl bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 font-bold flex items-center gap-1.5 shadow-xs">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Fase {currentPhase} de 2 ({currentPhase === 1 ? "Questões 1 a 100" : `Questões 101 a ${questions.length}`})</span>
+            </span>
+          ) : (
+            <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700/60 text-slate-300 font-medium">
+              Fase Única (1 a {questions.length} questões)
+            </span>
+          )}
+
+          <span className="px-2.5 py-1 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-bold flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>+{formatQuizPoints(pointsPerQuestion)} pts por acerto</span>
+          </span>
+        </div>
+
+        <div className="text-slate-400 text-[11px]">
+          Progresso Geral: <strong className="text-white">{progressPercent}%</strong>
+        </div>
+      </div>
+
       {/* Progress, Timer & Quick Controls */}
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs text-slate-400 gap-2 flex-wrap">
@@ -302,7 +352,12 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
 
             <button
               type="button"
-              onClick={() => setShowQuestionGrid(true)}
+              onClick={() => {
+                if (phaseInfo.hasPhases) {
+                  setSelectedGridPhase(currentPhase as 1 | 2);
+                }
+                setShowQuestionGrid(true);
+              }}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white cursor-pointer transition-colors"
             >
               <Layers className="w-3.5 h-3.5 text-indigo-400" />
@@ -353,7 +408,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
               </div>
             )}
 
-            {/* Lightning Mode (Raio) Switch Button - Matching Screenshot */}
+            {/* Lightning Mode (Raio) Switch Button */}
             <button
               type="button"
               id="toggle-instant-feedback-btn"
@@ -411,7 +466,55 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
         </div>
       )}
 
-      {/* Quick Question Selector Modal */}
+      {/* Phase 1 Completion & Phase 2 Transition Celebration Modal */}
+      {showPhaseTransitionModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-indigo-500/50 rounded-3xl p-6 sm:p-8 max-w-lg w-full space-y-5 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="w-16 h-16 rounded-3xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto border border-indigo-500/30">
+              <Sparkles className="w-8 h-8 text-amber-400 animate-pulse" />
+            </div>
+
+            <div className="text-center space-y-2">
+              <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold uppercase">
+                🎉 Fase 1 Concluída com Sucesso!
+              </span>
+              <h3 className="text-xl font-extrabold text-white">
+                Pronto para a 2ª Fase?
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                Você finalizou as primeiras <strong>100 questões</strong> da avaliação. O questionário totaliza <strong>{questions.length} questões</strong> e agora você iniciará a <strong>Fase 2 (Questões 101 a {questions.length})</strong>.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 text-xs text-slate-300 space-y-2">
+              <div className="flex items-center justify-between text-slate-400 border-b border-slate-800/80 pb-1.5">
+                <span>Fase 1:</span>
+                <span className="text-emerald-400 font-bold">100 Questões Respondidas</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-400 border-b border-slate-800/80 pb-1.5">
+                <span>Fase 2:</span>
+                <span className="text-indigo-400 font-bold">Questões 101 a {questions.length}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-400">
+                <span>Pontuação por acerto:</span>
+                <span className="text-amber-400 font-bold">+{formatQuizPoints(pointsPerQuestion)} pts cada</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              id="start-phase-2-btn"
+              onClick={handleStartPhase2}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-extrabold text-sm shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+            >
+              <span>Avançar e Iniciar Fase 2</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Question Selector Modal with Phase Tabs */}
       {showQuestionGrid && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full max-h-[85vh] overflow-y-auto space-y-4 shadow-2xl">
@@ -428,35 +531,69 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-5 sm:grid-cols-8 gap-2">
-              {questions.map((_, idx) => {
-                const isAnswered = userAnswers[idx] !== undefined;
-                const isCurrent = idx === currentIndex;
-                const isLocked = idx > currentIndex && !userAnswers[currentIndex];
+            {/* Phase Selector Tabs if 2 phases */}
+            {phaseInfo.hasPhases && (
+              <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-950 border border-slate-800 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setSelectedGridPhase(1)}
+                  className={`py-2 rounded-xl font-bold transition-all cursor-pointer ${
+                    selectedGridPhase === 1
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Fase 1 (1 a 100)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedGridPhase(2)}
+                  className={`py-2 rounded-xl font-bold transition-all cursor-pointer ${
+                    selectedGridPhase === 2
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Fase 2 (101 a {questions.length})
+                </button>
+              </div>
+            )}
 
-                return (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleJumpToQuestion(idx)}
-                    className={`py-2 rounded-xl text-xs font-bold transition-all cursor-pointer relative flex items-center justify-center ${
-                      isCurrent
-                        ? "bg-indigo-600 text-white ring-2 ring-indigo-400 shadow-md"
-                        : isAnswered
-                        ? "bg-emerald-950/70 border border-emerald-500/50 text-emerald-300"
-                        : isLocked
-                        ? "bg-slate-950/40 border border-slate-900 text-slate-600 opacity-60"
-                        : "bg-slate-950/70 border border-slate-800 text-slate-400 hover:text-white"
-                    }`}
-                    title={isLocked ? "Responda a questão atual primeiro" : `Questão ${idx + 1}`}
-                  >
-                    <span>{idx + 1}</span>
-                    {isLocked && (
-                      <Lock className="w-2.5 h-2.5 absolute top-1 right-1 text-slate-600" />
-                    )}
-                  </button>
-                );
-              })}
+            <div className="grid grid-cols-5 sm:grid-cols-8 gap-2">
+              {questions
+                .map((q, idx) => ({ q, idx }))
+                .filter(({ idx }) => {
+                  if (!phaseInfo.hasPhases) return true;
+                  return selectedGridPhase === 1 ? idx < 100 : idx >= 100;
+                })
+                .map(({ idx }) => {
+                  const isAnswered = userAnswers[idx] !== undefined;
+                  const isCurrent = idx === currentIndex;
+                  const isLocked = idx > currentIndex && !userAnswers[currentIndex];
+
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleJumpToQuestion(idx)}
+                      className={`py-2 rounded-xl text-xs font-bold transition-all cursor-pointer relative flex items-center justify-center ${
+                        isCurrent
+                          ? "bg-indigo-600 text-white ring-2 ring-indigo-400 shadow-md"
+                          : isAnswered
+                          ? "bg-emerald-950/70 border border-emerald-500/50 text-emerald-300"
+                          : isLocked
+                          ? "bg-slate-950/40 border border-slate-900 text-slate-600 opacity-60"
+                          : "bg-slate-950/70 border border-slate-800 text-slate-400 hover:text-white"
+                      }`}
+                      title={isLocked ? "Responda a questão atual primeiro" : `Questão ${idx + 1}`}
+                    >
+                      <span>{idx + 1}</span>
+                      {isLocked && (
+                        <Lock className="w-2.5 h-2.5 absolute top-1 right-1 text-slate-600" />
+                      )}
+                    </button>
+                  );
+                })}
             </div>
           </div>
         </div>
@@ -644,7 +781,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
                   <>
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="text-emerald-300 font-extrabold flex items-center gap-1">
-                      <span>Excelente! Você acertou (+50 pontos no Placar)</span>
+                      <span>Excelente! Você acertou (+{formatQuizPoints(pointsPerQuestion)} pontos no Placar)</span>
                       <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                     </span>
                   </>

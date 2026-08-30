@@ -38,6 +38,11 @@ import {
   saveStoredTheme,
   getStoredQuizAttempts,
 } from "../utils/storage";
+import {
+  clearQuizScoreHistoryAndRanking,
+  clearAllQuizzesScoreHistoryAndRanking,
+} from "../lib/quizService";
+import { getPointsPerQuestion, getQuizPhaseInfo, formatQuizPoints } from "../utils/scoring";
 
 interface SettingsScreenProps {
   currentUser: UserAccount;
@@ -88,6 +93,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [firebaseStatus, setFirebaseStatus] = useState<string | null>(null);
   const [showResetDeduplicationModal, setShowResetDeduplicationModal] = useState(false);
   const [resetSuccessMsg, setResetSuccessMsg] = useState<string | null>(null);
+
+  // Clear Quiz History & Ranking State (Admin only)
+  const [selectedQuizToClear, setSelectedQuizToClear] = useState<Quiz | null>(null);
+  const [isClearingQuizData, setIsClearingQuizData] = useState(false);
+  const [clearQuizSuccessMsg, setClearQuizSuccessMsg] = useState<string | null>(null);
+  const [showClearQuizModal, setShowClearQuizModal] = useState(false);
+  const [showClearAllQuizzesModal, setShowClearAllQuizzesModal] = useState(false);
+  const [isClearingAllQuizzesData, setIsClearingAllQuizzesData] = useState(false);
 
   // Attempts stats for student
   const studentAttempts = getStoredQuizAttempts(currentUser.email);
@@ -199,6 +212,47 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     setShowResetDeduplicationModal(false);
     setResetSuccessMsg("Memória de seções inexploradas redefinida com sucesso!");
     setTimeout(() => setResetSuccessMsg(null), 3500);
+  };
+
+  const handleOpenClearQuizModal = (quiz: Quiz) => {
+    setSelectedQuizToClear(quiz);
+    setShowClearQuizModal(true);
+  };
+
+  const handleConfirmClearQuizData = async () => {
+    if (!selectedQuizToClear) return;
+    setIsClearingQuizData(true);
+    try {
+      const result = await clearQuizScoreHistoryAndRanking(selectedQuizToClear.id);
+      setClearQuizSuccessMsg(
+        `Histórico de pontuação e ranking do questionário "${selectedQuizToClear.title}" foram limpos na base de dados com sucesso! (${result.deletedAttemptsCount} registros processados)`
+      );
+      setShowClearQuizModal(false);
+      setSelectedQuizToClear(null);
+      setTimeout(() => setClearQuizSuccessMsg(null), 5000);
+    } catch (err: any) {
+      console.error("Erro ao limpar dados do questionário:", err);
+      setClearQuizSuccessMsg(`Erro ao limpar questionário: ${err.message || "Erro desconhecido"}`);
+    } finally {
+      setIsClearingQuizData(false);
+    }
+  };
+
+  const handleConfirmClearAllQuizzesData = async () => {
+    setIsClearingAllQuizzesData(true);
+    try {
+      const result = await clearAllQuizzesScoreHistoryAndRanking();
+      setClearQuizSuccessMsg(
+        `Histórico e ranking de TODOS os questionários foram limpos com sucesso! (${result.deletedAttemptsCount} tentativas excluídas e ${result.quizzesResetCount} questionários resetados)`
+      );
+      setShowClearAllQuizzesModal(false);
+      setTimeout(() => setClearQuizSuccessMsg(null), 6000);
+    } catch (err: any) {
+      console.error("Erro ao limpar dados de todos os questionários:", err);
+      setClearQuizSuccessMsg(`Erro ao limpar questionários: ${err.message || "Erro desconhecido"}`);
+    } finally {
+      setIsClearingAllQuizzesData(false);
+    }
   };
 
   return (
@@ -646,6 +700,111 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             </div>
           </div>
 
+          {/* 5. ADMIN-ONLY: Clear Quiz Score History & Ranking Database Manager */}
+          <div className="p-5 sm:p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-4 shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-rose-500/20 text-rose-400">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    Histórico de Pontuações & Ranking por Questionário
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Limpe tentativas salvas, zere pontuações e redefina o ranking na base de dados
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 font-mono font-bold border border-rose-500/30">
+                Admin DB
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Gerencie individualmente ou limpe de uma só vez todas as tentativas, histórico de acertos e rankings na base de dados do Firestore e no armazenamento local.
+            </p>
+
+            {/* Action to clear all quizzes at once */}
+            <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-rose-300">Ação Geral em Massa</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-200 font-bold border border-rose-500/30">Todos os Questionários</span>
+                </div>
+                <p className="text-[11px] text-rose-200/80">
+                  Limpar todo o histórico de notas, tentativas e zerar o ranking geral de todas as avaliações de uma vez.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClearAllQuizzesModal(true)}
+                disabled={quizzes.length === 0}
+                className="py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-lg shadow-rose-950/60 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Limpar Histórico & Ranking de TODOS</span>
+              </button>
+            </div>
+
+            {clearQuizSuccessMsg && (
+              <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-200 text-xs flex items-center gap-2.5 shadow-md">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-medium">{clearQuizSuccessMsg}</span>
+              </div>
+            )}
+
+            {quizzes.length === 0 ? (
+              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-400">
+                Nenhum questionário cadastrado para gerenciar.
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                {quizzes.map((q) => {
+                  const qCount = q.questions?.length || 0;
+                  const phaseInfo = getQuizPhaseInfo(qCount);
+                  const ptsPerQ = getPointsPerQuestion(qCount);
+
+                  return (
+                    <div
+                      key={q.id}
+                      className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-700 transition-colors"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-xs font-bold text-white truncate max-w-xs sm:max-w-md">
+                            {q.title}
+                          </h4>
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold">
+                            {q.category}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                          <span>{qCount} questões (+{formatQuizPoints(ptsPerQ)} pts/acerto)</span>
+                          <span>•</span>
+                          <span className={phaseInfo.hasPhases ? "text-amber-400 font-semibold" : "text-slate-400"}>
+                            {phaseInfo.hasPhases ? "2 Fases (100 + " + (qCount - 100) + ")" : "1 Fase"}
+                          </span>
+                          <span>•</span>
+                          <span>{q.totalAnswered || 0} execuções</span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenClearQuizModal(q)}
+                        className="py-2 px-3.5 rounded-xl bg-slate-900 hover:bg-rose-950/50 hover:text-rose-200 text-slate-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-slate-800 hover:border-rose-500/50 shrink-0"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                        <span>Limpar Histórico & Ranking</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Advanced Anti-Deduplication Memory Manager */}
           <div className="p-5 sm:p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-4 shadow-lg">
             <div className="flex items-center gap-2.5">
@@ -703,6 +862,159 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold"
               >
                 Redefinir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear Quiz History & Ranking Confirmation Modal (Admin) */}
+      {showClearQuizModal && selectedQuizToClear && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
+          <div className="w-full max-w-lg p-6 sm:p-7 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30 shrink-0">
+                <Trash2 className="w-6 h-6 text-rose-400" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-white">
+                  Limpar Histórico e Ranking da Base de Dados?
+                </h4>
+                <p className="text-xs text-slate-400">
+                  Ação administrativa permanente para este questionário
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2 text-xs">
+              <p className="font-extrabold text-white">
+                {selectedQuizToClear.title}
+              </p>
+              <p className="text-slate-400">
+                Categoria: <span className="text-indigo-300 font-semibold">{selectedQuizToClear.category}</span> • Total de Questões: <span className="text-white font-semibold">{selectedQuizToClear.questions?.length || 0}</span>
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-rose-950/30 border border-rose-500/30 text-rose-200 text-xs space-y-1">
+              <p className="font-bold flex items-center gap-1.5 text-rose-300">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>O que será apagado:</span>
+              </p>
+              <ul className="list-disc list-inside text-[11px] text-rose-200/80 space-y-0.5 pl-1">
+                <li>Todas as tentativas e notas salvas para este questionário no Firestore e localmente</li>
+                <li>Estatísticas de aproveitamento e contador de resoluções</li>
+                <li>Classificações e pontuações do ranking desta prova</li>
+              </ul>
+              <p className="text-[11px] text-slate-300 pt-1 font-medium">
+                * As perguntas e o questionário em si continuarão disponíveis intactos.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClearQuizModal(false);
+                  setSelectedQuizToClear(null);
+                }}
+                disabled={isClearingQuizData}
+                className="px-4 py-2.5 rounded-xl text-slate-300 hover:text-white text-xs font-semibold hover:bg-slate-800 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearQuizData}
+                disabled={isClearingQuizData}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-rose-950/50 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isClearingQuizData ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Limpando Base de Dados...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Confirmar e Limpar Dados</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear ALL Quizzes History & Ranking Confirmation Modal (Admin) */}
+      {showClearAllQuizzesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="w-full max-w-lg p-6 sm:p-7 rounded-3xl bg-slate-900 border border-rose-500/30 shadow-2xl space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30 shrink-0">
+                <Trash2 className="w-6 h-6 text-rose-400" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-white">
+                  Limpar Histórico e Ranking de TODOS os Questionários?
+                </h4>
+                <p className="text-xs text-rose-300 font-semibold">
+                  Ação global irreversível na base de dados
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2 text-xs">
+              <p className="font-extrabold text-white flex items-center justify-between">
+                <span>Total de Questionários Afetados:</span>
+                <span className="text-amber-400 text-sm font-black">{quizzes.length} questionários</span>
+              </p>
+              <p className="text-slate-400 text-[11px] leading-relaxed">
+                Esta operação irá varrer toda a base de dados do Firestore e a memória local, excluindo todas as tentativas registradas por todos os alunos e restaurando as pontuações e rankings para zero.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-rose-950/40 border border-rose-500/40 text-rose-200 text-xs space-y-1.5">
+              <p className="font-bold flex items-center gap-1.5 text-rose-300">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>Impacto desta ação:</span>
+              </p>
+              <ul className="list-disc list-inside text-[11px] text-rose-200/90 space-y-1 pl-1">
+                <li>Exclusão de todas as resoluções e tentativas de provas salvas no Firestore</li>
+                <li>Zera os rankings gerais e individuais de todas as categorias</li>
+                <li>Zera os contadores de vezes respondidas de todos os questionários</li>
+              </ul>
+              <p className="text-[11px] text-emerald-300 pt-1 font-semibold flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>Os questionários e suas respectivas questões NÃO serão apagados.</span>
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearAllQuizzesModal(false)}
+                disabled={isClearingAllQuizzesData}
+                className="px-4 py-2.5 rounded-xl text-slate-300 hover:text-white text-xs font-semibold hover:bg-slate-800 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearAllQuizzesData}
+                disabled={isClearingAllQuizzesData}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-xs font-black flex items-center justify-center gap-2 shadow-lg shadow-rose-950/50 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isClearingAllQuizzesData ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Limpando Todos os Questionários...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Sim, Limpar TODOS os Questionários</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

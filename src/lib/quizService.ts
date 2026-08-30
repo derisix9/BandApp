@@ -8,6 +8,7 @@ import {
   deleteDoc,
   onSnapshot,
   query,
+  where,
   orderBy,
 } from "firebase/firestore";
 import {
@@ -20,7 +21,7 @@ import {
   User as FirebaseUser,
 } from "firebase/auth";
 import { auth, db, ADMIN_EMAIL, isAdminUser } from "./firebase";
-import { Quiz, UserAccount, UserRole, QuizAttemptRecord, LeaderboardEntry } from "../types";
+import { Quiz, Question, UserAccount, UserRole, QuizAttemptRecord, LeaderboardEntry } from "../types";
 import {
   getStoredQuizzes,
   saveQuiz as saveQuizLocal,
@@ -30,7 +31,11 @@ import {
   clearUserSession,
   saveQuizAttempt as saveQuizAttemptLocal,
   getStoredQuizAttempts as getStoredQuizAttemptsLocal,
+  clearQuizAttemptsFromStorage,
+  resetQuizStatisticsInStorage,
+  resetAllQuizzesStatisticsInStorage,
 } from "../utils/storage";
+import { getPointsPerQuestion } from "../utils/scoring";
 
 const QUIZZES_COLLECTION = "quizzes";
 const USERS_COLLECTION = "users";
@@ -479,6 +484,97 @@ export async function deleteQuizFromFirestore(quizId: number): Promise<void> {
 }
 
 /**
+ * Append questions from JSON to an existing quiz and save to Firestore & Local storage
+ */
+export async function appendQuestionsToExistingQuiz(
+  targetQuizId: number,
+  incomingQuestions: Question[],
+  userRole: UserRole = "admin",
+  options?: {
+    deduplicateByText?: boolean;
+    sourceFileName?: string;
+  }
+): Promise<{ success: boolean; updatedQuiz: Quiz; addedCount: number; duplicateCount: number }> {
+  // 1. Get existing quiz from local storage
+  const localQuizzes = getStoredQuizzes();
+  const existing = localQuizzes.find((q) => q.id === targetQuizId);
+
+  // 2. Fetch latest version from Firestore if available
+  let baseQuiz: Quiz | null = existing || null;
+  try {
+    const docRef = doc(db, QUIZZES_COLLECTION, String(targetQuizId));
+    const snap = await withTimeout(getDoc(docRef), 3500);
+    if (snap.exists()) {
+      baseQuiz = snap.data() as Quiz;
+    }
+  } catch (err) {
+    console.warn("Could not fetch remote quiz doc for append, using base quiz:", err);
+  }
+
+  if (!baseQuiz) {
+    throw new Error(`Questionário com ID ${targetQuizId} não foi encontrado.`);
+  }
+
+  const existingQuestions: Question[] = baseQuiz.questions || [];
+  const existingTextSet = new Set(
+    existingQuestions.map((q) => q.questionText.trim().toLowerCase())
+  );
+
+  let addedCount = 0;
+  let duplicateCount = 0;
+  const questionsToAdd: Question[] = [];
+
+  const timestamp = Date.now();
+  incomingQuestions.forEach((q, idx) => {
+    const textKey = q.questionText.trim().toLowerCase();
+    if (options?.deduplicateByText && existingTextSet.has(textKey)) {
+      duplicateCount++;
+      return;
+    }
+
+    questionsToAdd.push({
+      ...q,
+      id: timestamp + idx + Math.floor(Math.random() * 10000),
+      quizId: baseQuiz!.id,
+      category: q.category || baseQuiz!.category,
+    });
+    addedCount++;
+  });
+
+  if (questionsToAdd.length === 0) {
+    return {
+      success: true,
+      updatedQuiz: baseQuiz,
+      addedCount: 0,
+      duplicateCount,
+    };
+  }
+
+  const updatedQuestions = [...existingQuestions, ...questionsToAdd];
+  const appendNote = options?.sourceFileName
+    ? `+${addedCount} questões de ${options.sourceFileName}`
+    : `+${addedCount} questões via JSON`;
+
+  const updatedQuiz: Quiz = {
+    ...baseQuiz,
+    questions: updatedQuestions,
+    questionCount: updatedQuestions.length,
+    sectionsCoveredInfo: baseQuiz.sectionsCoveredInfo
+      ? `${baseQuiz.sectionsCoveredInfo} (${appendNote})`
+      : `${updatedQuestions.length} questões (${appendNote})`,
+  };
+
+  await saveQuizToFirestore(updatedQuiz, userRole);
+
+  return {
+    success: true,
+    updatedQuiz,
+    addedCount,
+    duplicateCount,
+  };
+}
+
+/**
  * Update quiz publish status and permissions (Admin only)
  */
 export async function updateQuizSettingsInFirestore(
@@ -668,21 +764,32 @@ export async function fetchLeaderboardFromFirestore(
             ? Math.round(userAttempts.reduce((acc, a) => acc + a.timeSpentSeconds, 0) / quizzesCompleted)
             : 0;
 
-        const highScoresBonus = userAttempts.filter((a) => a.scorePercent >= 80).length * 200;
-        const totalPoints = totalCorrectCount * 50 + quizzesCompleted * 100 + highScoresBonus;
+        // Points calculation based on official per-question scoring scale:
+        // +0.5 pts (40 questions), +0.4 pts (50 questions), +0.2 pts (100 questions),
+        // +0.13 pts (150 questions), +0.1 pts (200 questions)
+        const earnedPointsFromQuestions = userAttempts.reduce((acc, a) => {
+          const perQ = getPointsPerQuestion(a.totalQuestions || 50);
+          return acc + (a.correctCount * perQ);
+        }, 0);
+
+        // Completion bonus (+5 pts per completed test) and high-accuracy bonus (+10 pts for >= 80%)
+        const completionBonus = quizzesCompleted * 5;
+        const highScoresBonus = userAttempts.filter((a) => a.scorePercent >= 80).length * 10;
+        const rawTotalPoints = earnedPointsFromQuestions + completionBonus + highScoresBonus;
+        const totalPoints = Math.round(rawTotalPoints * 10) / 10;
 
         let tier: "Diamante" | "Ouro" | "Prata" | "Bronze" | "Aspirante" = "Aspirante";
-        if (totalPoints >= 4000) tier = "Diamante";
-        else if (totalPoints >= 2800) tier = "Ouro";
-        else if (totalPoints >= 1800) tier = "Prata";
-        else if (totalPoints >= 1000) tier = "Bronze";
+        if (totalPoints >= 150) tier = "Diamante";
+        else if (totalPoints >= 90) tier = "Ouro";
+        else if (totalPoints >= 50) tier = "Prata";
+        else if (totalPoints >= 20) tier = "Bronze";
         else tier = "Aspirante";
 
         let badge = "Iniciante";
         if (averageScorePercent >= 90 && quizzesCompleted > 0) badge = "Mente Brilhante";
         else if (averageScorePercent >= 80 && quizzesCompleted > 0) badge = "Alto Rendimento";
         else if (quizzesCompleted >= 10) badge = "Maratonista de Quizzes";
-        else if (totalPoints >= 2500) badge = "Especialista BandApp";
+        else if (totalPoints >= 100) badge = "Especialista BandApp";
         else if (quizzesCompleted > 0) badge = "Participante Ativo";
 
         const isCurrentUser = !!currentUser && currentUser.email.toLowerCase() === user.email.toLowerCase();
@@ -732,8 +839,107 @@ export async function fetchLeaderboardFromFirestore(
     }));
   } catch (err) {
     console.warn("Could not calculate Firestore leaderboard, falling back to local accounts:", err);
-    // Fallback to local accounts calculation if offline
     return [];
   }
+}
+
+/**
+ * Admin action: Clears score history, attempts and resets ranking for a specific quiz in Firestore and Local Storage
+ */
+export async function clearQuizScoreHistoryAndRanking(quizId: number): Promise<{ deletedAttemptsCount: number }> {
+  let deletedCount = 0;
+
+  // 1. Reset local storage immediately
+  resetQuizStatisticsInStorage(quizId);
+  clearQuizAttemptsFromStorage(quizId);
+
+  // 2. Query and delete all attempts for this quiz from Firestore
+  try {
+    const attemptsRef = collection(db, QUIZ_ATTEMPTS_COLLECTION);
+    const snap = await withTimeout(getDocs(attemptsRef), 4000).catch(() => null);
+
+    if (snap && !snap.empty) {
+      const deletePromises: Promise<void>[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as QuizAttemptRecord;
+        if (data && data.quizId === quizId) {
+          deletePromises.push(deleteDoc(doc(db, QUIZ_ATTEMPTS_COLLECTION, docSnap.id)));
+          deletedCount++;
+        }
+      });
+
+      if (deletePromises.length > 0) {
+        await Promise.all(deletePromises);
+      }
+    }
+
+    // 3. Reset quiz document stats in Firestore
+    const quizDocRef = doc(db, QUIZZES_COLLECTION, String(quizId));
+    await withTimeout(
+      updateDoc(quizDocRef, {
+        totalAnswered: 0,
+        lastScorePercent: 0,
+        lastCompletedAt: 0,
+      }),
+      3500
+    ).catch(() => {});
+  } catch (err) {
+    console.warn("Error clearing quiz attempts from Firestore:", err);
+  }
+
+  return { deletedAttemptsCount: deletedCount };
+}
+
+/**
+ * Admin action: Clears score history, attempts and resets ranking for ALL quizzes at once in Firestore and Local Storage
+ */
+export async function clearAllQuizzesScoreHistoryAndRanking(): Promise<{ deletedAttemptsCount: number; quizzesResetCount: number }> {
+  let deletedCount = 0;
+  let quizzesResetCount = 0;
+
+  // 1. Reset local storage immediately
+  resetAllQuizzesStatisticsInStorage();
+
+  // 2. Query and delete ALL attempts from Firestore
+  try {
+    const attemptsRef = collection(db, QUIZ_ATTEMPTS_COLLECTION);
+    const snap = await withTimeout(getDocs(attemptsRef), 5000).catch(() => null);
+
+    if (snap && !snap.empty) {
+      const deletePromises: Promise<void>[] = [];
+      snap.forEach((docSnap) => {
+        deletePromises.push(deleteDoc(doc(db, QUIZ_ATTEMPTS_COLLECTION, docSnap.id)));
+        deletedCount++;
+      });
+
+      if (deletePromises.length > 0) {
+        await Promise.all(deletePromises);
+      }
+    }
+
+    // 3. Reset all quizzes documents stats in Firestore
+    const quizzesRef = collection(db, QUIZZES_COLLECTION);
+    const quizSnap = await withTimeout(getDocs(quizzesRef), 5000).catch(() => null);
+    if (quizSnap && !quizSnap.empty) {
+      const resetPromises: Promise<void>[] = [];
+      quizSnap.forEach((docSnap) => {
+        resetPromises.push(
+          updateDoc(doc(db, QUIZZES_COLLECTION, docSnap.id), {
+            totalAnswered: 0,
+            lastScorePercent: 0,
+            lastCompletedAt: 0,
+          })
+        );
+        quizzesResetCount++;
+      });
+      if (resetPromises.length > 0) {
+        await Promise.all(resetPromises);
+      }
+    }
+  } catch (err) {
+    console.warn("Error clearing all quiz attempts from Firestore:", err);
+  }
+
+  return { deletedAttemptsCount: deletedCount, quizzesResetCount };
 }
 

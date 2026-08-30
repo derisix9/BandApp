@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import {
   Upload,
   FileText,
@@ -24,6 +24,10 @@ import {
   FileDown,
   Copy,
   FileCheck,
+  Layers,
+  FilePlus2,
+  PlusCircle,
+  Search,
 } from "lucide-react";
 import {
   DocumentAnalysis,
@@ -40,12 +44,13 @@ import { processDocumentContent } from "../utils/documentProcessor";
 import { parseJsonToQuestions, generateSample50QuestionsJson } from "../utils/jsonQuizParser";
 import { DeduplicationBanner } from "../components/DeduplicationBanner";
 import { saveDocumentProcessedSections } from "../utils/storage";
-import { saveQuizToFirestore } from "../lib/quizService";
+import { saveQuizToFirestore, appendQuestionsToExistingQuiz } from "../lib/quizService";
 
 interface CreateQuizScreenProps {
   categories: string[];
   currentUserRole: UserRole;
   currentUserEmail?: string;
+  quizzes?: Quiz[];
   onQuizCreated: (quizId: number) => void;
   onNavigateBack: () => void;
   onAddCategory: (category: string) => void;
@@ -100,6 +105,7 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
   categories,
   currentUserRole,
   currentUserEmail,
+  quizzes = [],
   onQuizCreated,
   onNavigateBack,
   onAddCategory,
@@ -134,6 +140,27 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
   const [jsonRawInput, setJsonRawInput] = useState("");
   const [jsonFileName, setJsonFileName] = useState<string | null>(null);
   const [showJsonPreview, setShowJsonPreview] = useState(false);
+
+  // JSON Destination Choice: Create New Quiz VS Append to Existing Quiz
+  const [jsonDestinationMode, setJsonDestinationMode] = useState<"new" | "append">("new");
+  const [selectedTargetQuizId, setSelectedTargetQuizId] = useState<number | null>(quizzes[0]?.id || null);
+  const [deduplicateOnAppend, setDeduplicateOnAppend] = useState<boolean>(true);
+  const [quizSearchFilter, setQuizSearchFilter] = useState<string>("");
+
+  const filteredTargetQuizzes = useMemo(() => {
+    if (!quizzes) return [];
+    const query = quizSearchFilter.trim().toLowerCase();
+    if (!query) return quizzes;
+    return quizzes.filter(
+      (q) =>
+        q.title.toLowerCase().includes(query) ||
+        q.category.toLowerCase().includes(query)
+    );
+  }, [quizzes, quizSearchFilter]);
+
+  const selectedTargetQuiz = useMemo(() => {
+    return quizzes.find((q) => q.id === selectedTargetQuizId) || quizzes[0] || null;
+  }, [quizzes, selectedTargetQuizId]);
 
   // Document analysis state
   const [analysis, setAnalysis] = useState<DocumentAnalysis | null>(null);
@@ -327,6 +354,55 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
       statusMessage: `Questionário com ${jsonQuestions.length} perguntas gravado na base de dados Firebase Firestore com sucesso!`,
       isComplete: true,
     });
+  };
+
+  const handleAppendQuizFromJson = async () => {
+    if (!jsonQuestions || jsonQuestions.length === 0) {
+      setAnalysisError("Nenhuma pergunta carregada para acrescentar.");
+      return;
+    }
+
+    if (!selectedTargetQuizId) {
+      setAnalysisError("Selecione o questionário existente que receberá as perguntas.");
+      return;
+    }
+
+    const targetQuiz = quizzes.find((q) => q.id === selectedTargetQuizId);
+    if (!targetQuiz) {
+      setAnalysisError("Questionário de destino selecionado não foi encontrado.");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+
+    try {
+      const result = await appendQuestionsToExistingQuiz(
+        selectedTargetQuizId,
+        jsonQuestions,
+        currentUserRole,
+        {
+          deduplicateByText: deduplicateOnAppend,
+          sourceFileName: jsonFileName || undefined,
+        }
+      );
+
+      setCreatedQuizId(selectedTargetQuizId);
+      const totalCount = result.updatedQuiz.questions?.length || result.updatedQuiz.questionCount;
+      const dupInfo = result.duplicateCount > 0 ? ` (${result.duplicateCount} duplicadas foram ignoradas)` : "";
+
+      setProgress({
+        step: 4,
+        totalSteps: 4,
+        statusMessage: `+${result.addedCount} perguntas foram acrescentadas com sucesso ao questionário "${result.updatedQuiz.title}"! Total atualizado: ${totalCount} perguntas.${dupInfo}`,
+        isComplete: true,
+      });
+    } catch (err: any) {
+      console.error("Erro ao acrescentar perguntas:", err);
+      setAnalysisError(err.message || "Falha ao acrescentar questões ao questionário.");
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handleTextAnalyze = async () => {
@@ -694,6 +770,166 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
               </div>
             )}
 
+            {/* Destination Mode Selector (Create New vs Append to Existing) */}
+            <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                <span>O que deseja fazer com as perguntas do JSON?</span>
+              </label>
+
+              <div className="grid sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setJsonDestinationMode("new")}
+                  className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex flex-col items-start gap-1 ${
+                    jsonDestinationMode === "new"
+                      ? "bg-emerald-950/40 border-emerald-500 text-white ring-1 ring-emerald-500 shadow-md shadow-emerald-950/50"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    Criar Novo Questionário
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    Gera um novo simulado com as perguntas do ficheiro
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJsonDestinationMode("append");
+                    if (!selectedTargetQuizId && quizzes && quizzes.length > 0) {
+                      setSelectedTargetQuizId(quizzes[0].id);
+                    }
+                  }}
+                  className={`p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex flex-col items-start gap-1 ${
+                    jsonDestinationMode === "append"
+                      ? "bg-emerald-950/40 border-emerald-500 text-white ring-1 ring-emerald-500 shadow-md shadow-emerald-950/50"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                    <FilePlus2 className="w-3.5 h-3.5" />
+                    Acrescentar a Questionário Existente
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    Adiciona as questões a um simulado já cadastrado
+                  </span>
+                </button>
+              </div>
+
+              {/* If Destination is Append to Existing Quiz */}
+              {jsonDestinationMode === "append" && (
+                <div className="pt-3 space-y-3 border-t border-slate-800/80">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-200">
+                        Selecione o Questionário de Destino:
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        {quizzes?.length || 0} questionários cadastrados
+                      </span>
+                    </div>
+
+                    {/* Search input for quizzes if more than 3 */}
+                    {quizzes && quizzes.length > 3 && (
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={quizSearchFilter}
+                          onChange={(e) => setQuizSearchFilter(e.target.value)}
+                          placeholder="Filtrar questionário por nome ou categoria..."
+                          className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-emerald-500"
+                        />
+                      </div>
+                    )}
+
+                    {/* Quizzes list */}
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                      {filteredTargetQuizzes.length === 0 ? (
+                        <p className="text-center py-4 text-xs text-slate-500">
+                          Nenhum questionário encontrado para o filtro.
+                        </p>
+                      ) : (
+                        filteredTargetQuizzes.map((q) => {
+                          const isSelected = (selectedTargetQuizId || quizzes[0]?.id) === q.id;
+                          const qCount = q.questions?.length || q.questionCount || 0;
+                          return (
+                            <div
+                              key={q.id}
+                              onClick={() => setSelectedTargetQuizId(q.id)}
+                              className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2.5 text-xs ${
+                                isSelected
+                                  ? "bg-emerald-950/50 border-emerald-500 text-white ring-1 ring-emerald-500"
+                                  : "bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <input
+                                  type="radio"
+                                  checked={isSelected}
+                                  onChange={() => setSelectedTargetQuizId(q.id)}
+                                  className="accent-emerald-500 shrink-0"
+                                />
+                                <div className="min-w-0">
+                                  <p className="font-bold text-slate-100 truncate leading-tight">
+                                    {q.title}
+                                  </p>
+                                  <span className="text-[10px] text-emerald-400/90 font-medium">
+                                    {q.category}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="px-2.5 py-0.5 rounded-md bg-slate-950 border border-slate-800 text-[11px] font-bold text-slate-300 shrink-0">
+                                {qCount} questões
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Math & Preview when quiz is selected */}
+                  {selectedTargetQuiz && (
+                    <div className="p-3.5 rounded-xl bg-slate-900 border border-emerald-500/30 text-xs space-y-2">
+                      <div className="flex items-center justify-between text-slate-300">
+                        <span>Questões atuais no questionário "{selectedTargetQuiz.title}":</span>
+                        <strong className="text-white">
+                          {selectedTargetQuiz.questions?.length || selectedTargetQuiz.questionCount || 0}
+                        </strong>
+                      </div>
+                      <div className="flex items-center justify-between text-emerald-300">
+                        <span>Novas perguntas no arquivo JSON:</span>
+                        <strong className="text-emerald-400">
+                          +{jsonQuestions ? jsonQuestions.length : 0}
+                        </strong>
+                      </div>
+                      <div className="pt-2 border-t border-slate-800 flex items-center justify-between font-bold text-white">
+                        <span>Total previsto de questões:</span>
+                        <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-black">
+                          {(selectedTargetQuiz.questions?.length || selectedTargetQuiz.questionCount || 0) + (jsonQuestions?.length || 0)} questões
+                        </span>
+                      </div>
+
+                      <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={deduplicateOnAppend}
+                          onChange={(e) => setDeduplicateOnAppend(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded accent-emerald-600 bg-slate-950 border-slate-700"
+                        />
+                        <span>Evitar duplicações (ignorar perguntas que já existam no questionário)</span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Validated JSON Questions Summary & Preview */}
             {jsonQuestions && jsonQuestions.length > 0 && (
               <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 space-y-3">
@@ -844,27 +1080,28 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
       </div>
 
       {/* Settings Card */}
-      <div className="p-5 sm:p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-5 shadow-lg">
-        <h3 className="text-base font-bold text-white flex items-center gap-2">
-          <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs">
-            2
-          </span>
-          Configurações do Questionário & Temporizador
-        </h3>
+      {!(inputMode === "json" && jsonDestinationMode === "append") ? (
+        <div className="p-5 sm:p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-5 shadow-lg">
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs">
+              2
+            </span>
+            Configurações do Questionário & Temporizador
+          </h3>
 
-        {/* Title input */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-bold text-slate-300">
-            Título do Questionário
-          </label>
-          <input
-            type="text"
-            value={quizTitle}
-            onChange={(e) => setQuizTitle(e.target.value)}
-            placeholder="Ex: Direito Constitucional — Artigo 5º"
-            className="w-full px-4 py-3 rounded-xl bg-slate-950/60 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium"
-          />
-        </div>
+          {/* Title input */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-300">
+              Título do Questionário
+            </label>
+            <input
+              type="text"
+              value={quizTitle}
+              onChange={(e) => setQuizTitle(e.target.value)}
+              placeholder="Ex: Direito Constitucional — Artigo 5º"
+              className="w-full px-4 py-3 rounded-xl bg-slate-950/60 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium"
+            />
+          </div>
 
         {/* Category selector */}
         <div className="space-y-2">
@@ -1004,150 +1241,42 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
 
               {/* 2. Timer Unit & Custom Duration Input */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-300 font-bold">Unidade e Duração:</span>
-                  <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTimerUnit("seconds");
-                        if (timerValue > 300) setTimerValue(30);
-                      }}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
-                        timerUnit === "seconds"
-                          ? "bg-amber-500 text-slate-950 shadow-xs"
-                          : "text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      Segundos (s)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTimerUnit("minutes");
-                        if (timerValue > 180) setTimerValue(20);
-                      }}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
-                        timerUnit === "minutes"
-                          ? "bg-amber-500 text-slate-950 shadow-xs"
-                          : "text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      Minutos (min)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTimerUnit("hours");
-                        if (timerValue > 12) setTimerValue(1);
-                      }}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
-                        timerUnit === "hours"
-                          ? "bg-amber-500 text-slate-950 shadow-xs"
-                          : "text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      Horas (h)
-                    </button>
-                  </div>
-                </div>
+                <label className="text-xs font-bold text-slate-300">
+                  Unidade e Duração:
+                </label>
 
-                {/* Direct Number Input & Presets */}
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 relative">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Caixa para digitalizar o número */}
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-medium text-slate-400">Duração / Valor numérico:</span>
                     <input
+                      id="quiz-timer-value-input"
                       type="number"
                       min={1}
-                      max={timerUnit === "seconds" ? 3600 : timerUnit === "minutes" ? 180 : 24}
+                      max={timerUnit === "seconds" ? 3600 : timerUnit === "minutes" ? 720 : 72}
                       value={timerValue}
-                      onChange={(e) => setTimerValue(Math.max(1, parseInt(e.target.value) || 1))}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-white font-bold text-sm focus:outline-hidden focus:border-amber-500"
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setTimerValue(isNaN(val) ? 1 : Math.max(1, val));
+                      }}
+                      placeholder="Ex: 30"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white font-bold text-sm focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
                     />
-                    <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-semibold pointer-events-none">
-                      {timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"}
-                    </span>
                   </div>
 
-                  {/* Preset quick buttons according to scope & unit */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {timerScope === "individual" ? (
-                      timerUnit === "seconds" ? (
-                        [15, 30, 45, 60, 90, 120].map((val) => (
-                          <button
-                            key={val}
-                            type="button"
-                            onClick={() => setTimerValue(val)}
-                            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                              timerValue === val
-                                ? "bg-amber-600 text-white"
-                                : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
-                            }`}
-                          >
-                            {val}s
-                          </button>
-                        ))
-                      ) : (
-                        [1, 2, 3, 5].map((val) => (
-                          <button
-                            key={val}
-                            type="button"
-                            onClick={() => setTimerValue(val)}
-                            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                              timerValue === val
-                                ? "bg-amber-600 text-white"
-                                : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
-                            }`}
-                          >
-                            {val}m
-                          </button>
-                        ))
-                      )
-                    ) : timerUnit === "minutes" ? (
-                      [5, 10, 15, 20, 30, 45, 60].map((val) => (
-                        <button
-                          key={val}
-                          type="button"
-                          onClick={() => setTimerValue(val)}
-                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                            timerValue === val
-                              ? "bg-amber-600 text-white"
-                              : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
-                          }`}
-                        >
-                          {val}m
-                        </button>
-                      ))
-                    ) : timerUnit === "hours" ? (
-                      [1, 2, 3].map((val) => (
-                        <button
-                          key={val}
-                          type="button"
-                          onClick={() => setTimerValue(val)}
-                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                            timerValue === val
-                              ? "bg-amber-600 text-white"
-                              : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
-                          }`}
-                        >
-                          {val}h
-                        </button>
-                      ))
-                    ) : (
-                      [60, 120, 300, 600, 1200].map((val) => (
-                        <button
-                          key={val}
-                          type="button"
-                          onClick={() => setTimerValue(val)}
-                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                            timerValue === val
-                              ? "bg-amber-600 text-white"
-                              : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
-                          }`}
-                        >
-                          {val}s
-                        </button>
-                      ))
-                    )}
+                  {/* Combobox para selecionar se será segundo, minuto ou hora */}
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-medium text-slate-400">Unidade de Tempo:</span>
+                    <select
+                      id="quiz-timer-unit-select"
+                      value={timerUnit}
+                      onChange={(e) => setTimerUnit(e.target.value as "seconds" | "minutes" | "hours")}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white font-bold text-sm focus:outline-hidden focus:border-amber-500 focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                    >
+                      <option value="seconds" className="bg-slate-900 text-white">Segundo(s)</option>
+                      <option value="minutes" className="bg-slate-900 text-white">Minuto(s)</option>
+                      <option value="hours" className="bg-slate-900 text-white">Hora(s)</option>
+                    </select>
                   </div>
                 </div>
               </div>
@@ -1158,13 +1287,13 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
                 <div className="space-y-0.5">
                   <p className="font-bold text-amber-300">
                     {timerScope === "individual"
-                      ? `Tempo Individual: ${timerValue} ${timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"} por questão`
-                      : `Tempo Geral: ${timerValue} ${timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"} no total`}
+                      ? `Tempo Individual: ${timerValue} ${timerUnit === "seconds" ? "segundo(s)" : timerUnit === "minutes" ? "minuto(s)" : "hora(s)"} por questão`
+                      : `Tempo Geral: ${timerValue} ${timerUnit === "seconds" ? "segundo(s)" : timerUnit === "minutes" ? "minuto(s)" : "hora(s)"} no total`}
                   </p>
                   <p className="text-[11px] text-amber-200/75">
                     {timerScope === "individual"
-                      ? `Cada aluno terá exatamente ${timerValue} ${timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"} para responder cada pergunta. Ao expirar o tempo, o sistema tocará um alerta e avançará automaticamente para a próxima.`
-                      : `O aluno terá ${timerValue} ${timerUnit === "seconds" ? "segundos" : timerUnit === "minutes" ? "minutos" : "horas"} para responder todas as questões do questionário. Ao expirar o tempo, a prova será finalizada automaticamente.`}
+                      ? `Cada aluno terá exatamente ${timerValue} ${timerUnit === "seconds" ? "segundo(s)" : timerUnit === "minutes" ? "minuto(s)" : "hora(s)"} para responder cada pergunta. Ao expirar o tempo, o sistema tocará um alerta e avançará automaticamente para a próxima.`
+                      : `O aluno terá ${timerValue} ${timerUnit === "seconds" ? "segundo(s)" : timerUnit === "minutes" ? "minuto(s)" : "hora(s)"} para responder todas as questões do questionário. Ao expirar o tempo, a prova será finalizada automaticamente.`}
                   </p>
                 </div>
               </div>
@@ -1326,6 +1455,19 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
           </>
         )}
       </div>
+      ) : (
+        /* Helpful banner when appending to existing quiz */
+        <div className="p-5 rounded-3xl bg-slate-900/60 border border-slate-800 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
+            <CheckCircle className="w-4 h-4" />
+            <span>Configurações herdadas do questionário de destino</span>
+          </div>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            As novas questões serão incorporadas diretamente ao questionário{" "}
+            <strong className="text-slate-200">"{selectedTargetQuiz?.title || "selecionado"}"</strong>, preservando a categoria, temporizador, visibilidade e permissões já existentes.
+          </p>
+        </div>
+      )}
 
       {analysisError && (
         <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-500/40 text-rose-200 text-xs flex items-center gap-2.5">
@@ -1334,22 +1476,57 @@ export const CreateQuizScreen: React.FC<CreateQuizScreenProps> = ({
         </div>
       )}
 
-      {/* Action Button: JSON Direct vs AI Generation */}
+      {/* Action Button: JSON Direct (Create vs Append) vs AI Generation */}
       {inputMode === "json" ? (
-        <button
-          id="submit-create-quiz-json-btn"
-          type="button"
-          onClick={handleCreateQuizFromJson}
-          disabled={!jsonQuestions || jsonQuestions.length === 0}
-          className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none text-white font-extrabold text-sm sm:text-base shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2.5 transition-all cursor-pointer"
-        >
-          <Zap className="w-5 h-5 text-amber-300" />
-          <span>
-            {jsonQuestions && jsonQuestions.length > 0
-              ? `Salvar Questionário de ${jsonQuestions.length} Perguntas no Firebase`
-              : "Carregue o Arquivo JSON com as Perguntas"}
-          </span>
-        </button>
+        jsonDestinationMode === "append" ? (
+          <button
+            id="submit-append-quiz-json-btn"
+            type="button"
+            onClick={handleAppendQuizFromJson}
+            disabled={!jsonQuestions || jsonQuestions.length === 0 || !selectedTargetQuizId || isAnalyzing}
+            className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none text-white font-extrabold text-sm sm:text-base shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2.5 transition-all cursor-pointer"
+          >
+            {isAnalyzing ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Acrescentando Perguntas ao Firebase...</span>
+              </>
+            ) : (
+              <>
+                <Plus className="w-5 h-5 text-amber-300" />
+                <span>
+                  {jsonQuestions && jsonQuestions.length > 0 && selectedTargetQuiz
+                    ? `Acrescentar +${jsonQuestions.length} Perguntas a "${selectedTargetQuiz.title}"`
+                    : "Carregue o Arquivo JSON e Selecione o Questionário"}
+                </span>
+              </>
+            )}
+          </button>
+        ) : (
+          <button
+            id="submit-create-quiz-json-btn"
+            type="button"
+            onClick={handleCreateQuizFromJson}
+            disabled={!jsonQuestions || jsonQuestions.length === 0 || isAnalyzing}
+            className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none text-white font-extrabold text-sm sm:text-base shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2.5 transition-all cursor-pointer"
+          >
+            {isAnalyzing ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Gravando no Firebase Firestore...</span>
+              </>
+            ) : (
+              <>
+                <Zap className="w-5 h-5 text-amber-300" />
+                <span>
+                  {jsonQuestions && jsonQuestions.length > 0
+                    ? `Salvar Novo Questionário de ${jsonQuestions.length} Perguntas no Firebase`
+                    : "Carregue o Arquivo JSON com as Perguntas"}
+                </span>
+              </>
+            )}
+          </button>
+        )
       ) : (
         <button
           id="submit-generate-quiz-btn"
