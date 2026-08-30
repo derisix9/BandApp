@@ -48,6 +48,7 @@ interface SettingsScreenProps {
   currentUser: UserAccount;
   quizzes: Quiz[];
   onLogout: () => void;
+  onRefreshQuizzes?: () => Promise<void> | void;
   theme?: AppTheme;
   onThemeChange?: (theme: AppTheme) => void;
 }
@@ -56,6 +57,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   currentUser,
   quizzes,
   onLogout,
+  onRefreshQuizzes,
   theme,
   onThemeChange,
 }) => {
@@ -224,6 +226,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     setIsClearingQuizData(true);
     try {
       const result = await clearQuizScoreHistoryAndRanking(selectedQuizToClear.id);
+      if (onRefreshQuizzes) {
+        await onRefreshQuizzes();
+      }
       setClearQuizSuccessMsg(
         `Histórico de pontuação e ranking do questionário "${selectedQuizToClear.title}" foram limpos na base de dados com sucesso! (${result.deletedAttemptsCount} registros processados)`
       );
@@ -242,6 +247,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     setIsClearingAllQuizzesData(true);
     try {
       const result = await clearAllQuizzesScoreHistoryAndRanking();
+      if (onRefreshQuizzes) {
+        await onRefreshQuizzes();
+      }
       setClearQuizSuccessMsg(
         `Histórico e ranking de TODOS os questionários foram limpos com sucesso! (${result.deletedAttemptsCount} tentativas excluídas e ${result.quizzesResetCount} questionários resetados)`
       );

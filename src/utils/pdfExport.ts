@@ -1,5 +1,10 @@
 import { jsPDF } from "jspdf";
 import { Quiz, OptionLetter } from "../types";
+import {
+  getPointsPerQuestion,
+  calculateQuizPoints,
+  formatQuizPoints,
+} from "./scoring";
 
 export interface QuizPdfExportOptions {
   quiz: Quiz;
@@ -7,6 +12,8 @@ export interface QuizPdfExportOptions {
   correctCount: number;
   userAnswers: Record<number, OptionLetter>;
   userEmail?: string;
+  earnedPoints?: number;
+  pointsPerQuestion?: number;
 }
 
 export function exportQuizResultToPdf({
@@ -15,6 +22,8 @@ export function exportQuizResultToPdf({
   correctCount,
   userAnswers,
   userEmail,
+  earnedPoints,
+  pointsPerQuestion,
 }: QuizPdfExportOptions): void {
   const doc = new jsPDF({
     orientation: "portrait",
@@ -69,7 +78,7 @@ export function exportQuizResultToPdf({
   // Quiz Overview Box
   doc.setFillColor(248, 250, 252); // Slate 50
   doc.setDrawColor(226, 232, 240); // Slate 200
-  doc.roundedRect(margin, currentY, contentWidth, 36, 3, 3, "FD");
+  doc.roundedRect(margin, currentY, contentWidth, 38, 3, 3, "FD");
 
   // Title
   doc.setFont("helvetica", "bold");
@@ -86,6 +95,8 @@ export function exportQuizResultToPdf({
   const questions = quiz.questions || [];
   const totalQuestions = questions.length;
   const errorCount = totalQuestions - correctCount;
+  const ptsPerQ = pointsPerQuestion ?? getPointsPerQuestion(totalQuestions);
+  const totalRoundPts = earnedPoints ?? calculateQuizPoints(correctCount, totalQuestions);
 
   // Rating Badge in Overview
   let statusText = "Excelente!";
@@ -100,7 +111,7 @@ export function exportQuizResultToPdf({
 
   // Score Highlight Circle / Box on the right
   doc.setFillColor(badgeColor[0], badgeColor[1], badgeColor[2]);
-  doc.roundedRect(margin + contentWidth - 36, currentY + 4, 31, 28, 3, 3, "F");
+  doc.roundedRect(margin + contentWidth - 36, currentY + 4, 31, 30, 3, 3, "F");
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
@@ -111,19 +122,23 @@ export function exportQuizResultToPdf({
   doc.setFontSize(6.5);
   doc.text("APROVEITAMENTO", margin + contentWidth - 20.5, currentY + 24, { align: "center" });
 
-  // Stats row underneath overview
+  // Stats row underneath overview (Includes specific round points)
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(51, 65, 85);
-  doc.text(`Acertos: ${correctCount}/${totalQuestions}`, margin + 5, currentY + 28);
+  doc.text(`Acertos: ${correctCount}/${totalQuestions}`, margin + 5, currentY + 24);
   doc.setTextColor(225, 29, 72);
-  doc.text(`Erros: ${errorCount}`, margin + 45, currentY + 28);
-  doc.setTextColor(99, 102, 241);
-  doc.text(`Formato: 4 Opções (A, B, C, D)`, margin + 75, currentY + 28);
-  doc.setTextColor(badgeColor[0], badgeColor[1], badgeColor[2]);
-  doc.text(`Classificação: ${statusText}`, margin + 130, currentY + 28);
+  doc.text(`Erros: ${errorCount}`, margin + 45, currentY + 24);
+  doc.setTextColor(217, 119, 6); // amber-600
+  doc.text(`Pontos da Rodada: +${formatQuizPoints(totalRoundPts)} pts (${correctCount} × ${formatQuizPoints(ptsPerQ)})`, margin + 75, currentY + 24);
 
-  currentY += 41;
+  doc.setFontSize(7.5);
+  doc.setTextColor(99, 102, 241);
+  doc.text(`Formato: 4 Opções (A, B, C, D)`, margin + 5, currentY + 32);
+  doc.setTextColor(badgeColor[0], badgeColor[1], badgeColor[2]);
+  doc.text(`Classificação: ${statusText}`, margin + 75, currentY + 32);
+
+  currentY += 43;
 
   // Section Header: Questões e Gabarito
   doc.setFont("helvetica", "bold");

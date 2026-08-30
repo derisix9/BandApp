@@ -20,6 +20,13 @@ import {
   X,
   Timer,
   Volume2,
+  ShieldAlert,
+  ShieldCheck,
+  Maximize2,
+  Minimize2,
+  AlertOctagon,
+  LogOut,
+  Ban,
 } from "lucide-react";
 import { Quiz, OptionLetter } from "../types";
 import { OptionCard } from "../components/OptionCard";
@@ -27,6 +34,7 @@ import {
   playCorrectSound,
   playIncorrectSound,
   playTimeoutAlertSound,
+  playSecurityAlarmSound,
 } from "../utils/audioEffects";
 import {
   getPointsPerQuestion,
@@ -34,6 +42,53 @@ import {
   getCurrentPhase,
   formatQuizPoints,
 } from "../utils/scoring";
+
+export function requestFullScreenMode(): Promise<void> {
+  try {
+    const elem = document.documentElement as any;
+    if (elem.requestFullscreen) {
+      return elem.requestFullscreen().catch(() => {});
+    } else if (elem.webkitRequestFullscreen) {
+      return elem.webkitRequestFullscreen();
+    } else if (elem.mozRequestFullScreen) {
+      return elem.mozRequestFullScreen();
+    } else if (elem.msRequestFullscreen) {
+      return elem.msRequestFullscreen();
+    }
+  } catch (e) {
+    console.warn("Fullscreen request error:", e);
+  }
+  return Promise.resolve();
+}
+
+export function exitFullScreenMode(): Promise<void> {
+  try {
+    const doc = document as any;
+    if (doc.exitFullscreen && doc.fullscreenElement) {
+      return doc.exitFullscreen().catch(() => {});
+    } else if (doc.webkitExitFullscreen && doc.webkitFullscreenElement) {
+      return doc.webkitExitFullscreen();
+    } else if (doc.mozCancelFullScreen && doc.mozFullScreenElement) {
+      return doc.mozCancelFullScreen();
+    } else if (doc.msExitFullscreen && doc.msFullscreenElement) {
+      return doc.msExitFullscreen();
+    }
+  } catch (e) {
+    console.warn("Fullscreen exit error:", e);
+  }
+  return Promise.resolve();
+}
+
+export function isDocumentInFullscreen(): boolean {
+  if (typeof document === "undefined") return false;
+  const doc = document as any;
+  return Boolean(
+    doc.fullscreenElement ||
+    doc.webkitFullscreenElement ||
+    doc.mozFullScreenElement ||
+    doc.msFullscreenElement
+  );
+}
 
 interface QuizRunnerScreenProps {
   quiz: Quiz;
@@ -62,6 +117,14 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   const [questionAutoAdvanceNotice, setQuestionAutoAdvanceNotice] = useState<string | null>(null);
   const [showPhaseTransitionModal, setShowPhaseTransitionModal] = useState(false);
   const [selectedGridPhase, setSelectedGridPhase] = useState<1 | 2>(1);
+
+  // Fullscreen & Anti-fraud Security States
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isSecurityActive, setIsSecurityActive] = useState(false);
+  const [isAnnulled, setIsAnnulled] = useState(false);
+  const [annulmentReason, setAnnulmentReason] = useState("");
+  const [showExitFullscreenConfirmModal, setShowExitFullscreenConfirmModal] = useState(false);
+  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
 
   const questions = quiz.questions || [];
   const pointsPerQuestion = getPointsPerQuestion(questions.length);
@@ -98,6 +161,120 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
 
   const currentQuestion = questions[currentIndex];
 
+  // 1. Enter Fullscreen on Mount and prepare Security Monitor
+  useEffect(() => {
+    let isMounted = true;
+
+    const tryEnterFullscreen = async () => {
+      try {
+        await requestFullScreenMode();
+        if (isMounted) {
+          const inFS = isDocumentInFullscreen();
+          setIsFullscreen(inFS);
+          if (inFS) {
+            setIsSecurityActive(true);
+          } else {
+            // Browser required gesture, prompt with one click
+            setShowFullscreenPrompt(true);
+          }
+        }
+      } catch {
+        if (isMounted) setShowFullscreenPrompt(true);
+      }
+    };
+
+    tryEnterFullscreen();
+
+    return () => {
+      isMounted = false;
+      exitFullScreenMode();
+    };
+  }, []);
+
+  // 2. Anti-fraud Security Monitor: Fullscreen exit, Tab visibility, Window blur & Anti-cheating
+  useEffect(() => {
+    if (isAnnulled) return;
+
+    const handleFullscreenChange = () => {
+      const inFS = isDocumentInFullscreen();
+      setIsFullscreen(inFS);
+
+      // If anti-fraud security is active and user leaves fullscreen during the active quiz -> ANNUL!
+      if (isSecurityActive && !inFS && !isAnnulled) {
+        handleAnnulQuiz("Saída do modo de tela cheia detectada durante a avaliação.");
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      // If user switches tab or minimizes window during active quiz -> ANNUL!
+      if (document.visibilityState === "hidden" && isSecurityActive && !isAnnulled) {
+        handleAnnulQuiz("Alternância de aba ou minimização de janela detectada durante a avaliação.");
+      }
+    };
+
+    const handleWindowBlur = () => {
+      // If user switches application or clicks outside the window -> ANNUL!
+      if (isSecurityActive && !isAnnulled) {
+        handleAnnulQuiz("Perda de foco da janela ou troca de aplicativo detectada durante a avaliação.");
+      }
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Block devtools, inspect and view-source shortcuts during exam
+      if (
+        e.key === "F12" ||
+        (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "J" || e.key === "j" || e.key === "C" || e.key === "c")) ||
+        (e.ctrlKey && (e.key === "u" || e.key === "U"))
+      ) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("contextmenu", handleContextMenu);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isSecurityActive, isAnnulled]);
+
+  const handleAnnulQuiz = (reason: string) => {
+    setIsAnnulled(true);
+    setAnnulmentReason(reason);
+    setIsSecurityActive(false);
+    playSecurityAlarmSound();
+    exitFullScreenMode();
+  };
+
+  const handleManualEnterFullscreen = async () => {
+    await requestFullScreenMode();
+    setIsFullscreen(true);
+    setIsSecurityActive(true);
+    setShowFullscreenPrompt(false);
+  };
+
+  const handleConfirmExitFullscreen = () => {
+    setShowExitFullscreenConfirmModal(false);
+    handleAnnulQuiz("Saída voluntária da tela cheia confirmada pelo candidato.");
+  };
+
   // Scroll to top and reset question timer on question index change
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -109,7 +286,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
 
   // Main countdown timer ticker
   useEffect(() => {
-    if (timeExpired) return;
+    if (timeExpired || isAnnulled) return;
 
     const timer = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
@@ -152,6 +329,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
     isTimed,
     isIndividualTimer,
     timeExpired,
+    isAnnulled,
     currentIndex,
     questions.length,
     configuredDurationSeconds,
@@ -159,10 +337,67 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
 
   // Auto-finish on general or last-question timer expiration
   useEffect(() => {
-    if (timeExpired) {
+    if (timeExpired && !isAnnulled) {
       handleFinish();
     }
-  }, [timeExpired]);
+  }, [timeExpired, isAnnulled]);
+
+  // Annulled Screen View
+  if (isAnnulled) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950 text-white select-none">
+        <div className="max-w-lg w-full p-6 sm:p-8 rounded-3xl bg-slate-900 border-2 border-rose-600/70 shadow-2xl shadow-rose-950/80 space-y-6 text-center animate-in fade-in zoom-in duration-200">
+          <div className="w-20 h-20 mx-auto rounded-3xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 animate-pulse shadow-lg shadow-rose-950/50">
+            <ShieldAlert className="w-10 h-10" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-[10px] px-3 py-1 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 font-black uppercase tracking-wider">
+              Segurança Anti-Fraude
+            </span>
+            <h2 className="text-xl sm:text-2xl font-black text-rose-400 tracking-tight">
+              AVALIAÇÃO ANULADA
+            </h2>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Esta prova foi cancelada e desclassificada devido a uma violação das diretrizes de segurança.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-rose-950/50 border border-rose-500/40 text-left space-y-1.5 text-xs shadow-inner">
+            <div className="flex items-center gap-2 text-rose-300 font-bold">
+              <AlertOctagon className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>Infração Detectada:</span>
+            </div>
+            <p className="text-slate-200 pl-6 leading-relaxed font-medium">
+              {annulmentReason || "Saída do modo de tela cheia ou alternância de abas/janelas."}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-left text-xs">
+            <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800">
+              <span className="text-[10px] text-slate-400 font-bold uppercase">Nota Atribuída</span>
+              <p className="text-lg font-black text-rose-400 mt-0.5">0% (0 acertos)</p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800">
+              <span className="text-[10px] text-slate-400 font-bold uppercase">Status</span>
+              <p className="text-sm font-black text-amber-400 mt-1">Desclassificado</p>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={onNavigateBack}
+              className="w-full py-3.5 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-98 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 border border-slate-700 hover:border-slate-600 transition-all cursor-pointer shadow-lg"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Voltar para a Página Inicial</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentQuestion) {
     return (
@@ -283,6 +518,9 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
       return;
     }
 
+    setIsSecurityActive(false);
+    exitFullScreenMode();
+
     let correct = 0;
     questions.forEach((q, idx) => {
       const chosen = userAnswers[idx];
@@ -309,29 +547,48 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   ];
 
   return (
-    <div id="quiz-runner-screen" className="max-w-3xl mx-auto px-4 py-6 pb-28 space-y-6">
-      {/* Top Banner: Phase & Points Per Question Scale */}
-      <div className="flex items-center justify-between gap-2 flex-wrap text-xs bg-slate-900/90 border border-slate-800 p-2.5 rounded-2xl">
+    <div id="quiz-runner-screen" className="max-w-3xl mx-auto px-4 py-4 pb-28 space-y-5 select-none">
+      {/* Top Security & Fullscreen Action Bar */}
+      <div className="flex items-center justify-between gap-2 flex-wrap text-xs bg-slate-900/95 border border-slate-800 p-2.5 rounded-2xl shadow-md">
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Anti-fraud Active Badge */}
+          <span className="px-2.5 py-1 rounded-xl bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 font-bold flex items-center gap-1.5 shadow-xs">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Modo Seguro Ativo</span>
+          </span>
+
           {phaseInfo.hasPhases ? (
-            <span className="px-2.5 py-1 rounded-xl bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 font-bold flex items-center gap-1.5 shadow-xs">
+            <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700/60 text-slate-300 font-bold flex items-center gap-1.5 shadow-xs">
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Fase {currentPhase} de 2 ({currentPhase === 1 ? "Questões 1 a 100" : `Questões 101 a ${questions.length}`})</span>
+              <span>Fase {currentPhase} de 2</span>
             </span>
           ) : (
             <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700/60 text-slate-300 font-medium">
-              Fase Única (1 a {questions.length} questões)
+              Fase Única
             </span>
           )}
 
           <span className="px-2.5 py-1 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-bold flex items-center gap-1">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            <span>+{formatQuizPoints(pointsPerQuestion)} pts por acerto</span>
+            <span>+{formatQuizPoints(pointsPerQuestion)} pts/acerto</span>
           </span>
         </div>
 
-        <div className="text-slate-400 text-[11px]">
-          Progresso Geral: <strong className="text-white">{progressPercent}%</strong>
+        {/* Dedicated Sair da Tela Cheia Button */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            id="quiz-exit-fullscreen-btn"
+            onClick={() => setShowExitFullscreenConfirmModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/70 border border-rose-500/40 hover:bg-rose-900/90 text-rose-200 hover:text-white text-xs font-black shadow-md cursor-pointer transition-all active:scale-95"
+            title="Sair da tela cheia (Atenção: anula a avaliação)"
+          >
+            <Minimize2 className="w-3.5 h-3.5 text-rose-400" />
+            <span>Sair da Tela Cheia</span>
+            <span className="hidden sm:inline text-[9px] px-1.5 py-0.5 rounded-md bg-rose-900/90 text-rose-200 font-mono">
+              ⚠️ Anula
+            </span>
+          </button>
         </div>
       </div>
 
@@ -347,7 +604,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
               title="Sair do questionário sem registrar estatísticas"
             >
               <X className="w-3.5 h-3.5" />
-              <span className="hidden xs:inline">Sair</span>
+              <span className="hidden xs:inline">Desistir</span>
             </button>
 
             <button
@@ -448,55 +705,47 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
       </div>
 
       {/* Auto-Advance Notification Toast for Individual Timer */}
-      {questionAutoAdvanceNotice && (
-        <div className="p-3 rounded-2xl bg-amber-950/80 border border-amber-500 text-amber-200 text-xs flex items-center gap-2.5 animate-in fade-in zoom-in duration-200">
-          <Timer className="w-4 h-4 text-amber-400 shrink-0 animate-spin" />
-          <span className="font-bold">{questionAutoAdvanceNotice}</span>
-        </div>
-      )}
+      <AnimatePresence>
+        {questionAutoAdvanceNotice && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="p-3 rounded-2xl bg-amber-950/90 border border-amber-500/50 text-amber-200 text-xs font-bold text-center flex items-center justify-center gap-2 shadow-lg"
+          >
+            <Timer className="w-4 h-4 text-amber-400 animate-spin" />
+            <span>{questionAutoAdvanceNotice}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Time Expired Notice */}
-      {timeExpired && (
-        <div className="p-4 rounded-2xl bg-rose-950/80 border border-rose-500 text-rose-200 text-xs flex items-center gap-3 animate-bounce">
-          <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
-          <div>
-            <p className="font-bold">Tempo Esgotado!</p>
-            <p className="text-rose-300/90">O tempo estabelecido pelo administrador expirou. Calculando pontuação...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Phase 1 Completion & Phase 2 Transition Celebration Modal */}
+      {/* Phase 1 Completion & Transition Celebration Modal */}
       {showPhaseTransitionModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-indigo-500/50 rounded-3xl p-6 sm:p-8 max-w-lg w-full space-y-5 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <div className="w-16 h-16 rounded-3xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto border border-indigo-500/30">
-              <Sparkles className="w-8 h-8 text-amber-400 animate-pulse" />
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 sm:p-7 max-w-md w-full space-y-4 shadow-2xl animate-in fade-in zoom-in duration-200 text-center">
+            <div className="w-16 h-16 rounded-3xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto border border-indigo-500/30 shadow-lg">
+              <Sparkles className="w-8 h-8 text-amber-400" />
             </div>
 
-            <div className="text-center space-y-2">
-              <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold uppercase">
-                🎉 Fase 1 Concluída com Sucesso!
+            <div className="space-y-1.5">
+              <span className="text-[10px] px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-bold uppercase">
+                Parabéns! Fase 1 Concluída
               </span>
-              <h3 className="text-xl font-extrabold text-white">
-                Pronto para a 2ª Fase?
+              <h3 className="text-xl font-black text-white tracking-tight">
+                Você finalizou as primeiras 100 questões!
               </h3>
-              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                Você finalizou as primeiras <strong>100 questões</strong> da avaliação. O questionário totaliza <strong>{questions.length} questões</strong> e agora você iniciará a <strong>Fase 2 (Questões 101 a {questions.length})</strong>.
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Agora iniciaremos a <strong>Fase 2</strong> com as questões de <strong>101 a {questions.length}</strong>.
               </p>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 text-xs text-slate-300 space-y-2">
-              <div className="flex items-center justify-between text-slate-400 border-b border-slate-800/80 pb-1.5">
-                <span>Fase 1:</span>
-                <span className="text-emerald-400 font-bold">100 Questões Respondidas</span>
+            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-400 space-y-1">
+              <div className="flex items-center justify-between text-white font-bold">
+                <span>Questões restantes:</span>
+                <span className="text-indigo-400 font-black">{questions.length - 100} questões</span>
               </div>
-              <div className="flex items-center justify-between text-slate-400 border-b border-slate-800/80 pb-1.5">
-                <span>Fase 2:</span>
-                <span className="text-indigo-400 font-bold">Questões 101 a {questions.length}</span>
-              </div>
-              <div className="flex items-center justify-between text-slate-400">
-                <span>Pontuação por acerto:</span>
+              <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                <span>Pontos adicionais:</span>
                 <span className="text-amber-400 font-bold">+{formatQuizPoints(pointsPerQuestion)} pts cada</span>
               </div>
             </div>
@@ -599,7 +848,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
         </div>
       )}
 
-      {/* Exit Confirmation Modal */}
+      {/* Exit Quiz Confirmation Modal */}
       {showExitConfirmModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -608,7 +857,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
             </div>
 
             <div className="text-center space-y-2">
-              <h3 className="text-lg font-bold text-white">Deseja sair do simulado?</h3>
+              <h3 className="text-lg font-bold text-white">Deseja desistir do questionário?</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
                 Você respondeu <strong className="text-white">{answeredCount}</strong> de <strong className="text-white">{questions.length}</strong> questões.
               </p>
@@ -616,10 +865,10 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
               <div className="p-3 rounded-2xl bg-slate-950/90 border border-amber-500/30 text-[11px] text-slate-300 text-left space-y-1.5 shadow-inner">
                 <div className="flex items-center gap-1.5 text-amber-400 font-bold text-xs">
                   <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>Regra de Estatísticas e Ranking</span>
+                  <span>Aviso de Desistência</span>
                 </div>
                 <p className="leading-relaxed">
-                  Como este questionário <strong>não foi concluído</strong>, nenhuma resposta, tempo ou pontuação será registrado. Este teste <strong>NÃO constará no seu histórico de estatísticas nem no ranking dos estudantes</strong>.
+                  Como este questionário <strong>não foi concluído</strong>, nenhum acerto ou pontuação será computado no seu histórico de estatísticas.
                 </p>
               </div>
             </div>
@@ -630,20 +879,113 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
                 onClick={() => setShowExitConfirmModal(false)}
                 className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-colors cursor-pointer"
               >
-                Continuar Simulado
+                Continuar Prova
               </button>
               <button
                 type="button"
                 id="confirm-exit-quiz-btn"
                 onClick={() => {
                   setShowExitConfirmModal(false);
+                  exitFullScreenMode();
                   onNavigateBack();
                 }}
                 className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-xs font-extrabold transition-all cursor-pointer shadow-lg shadow-rose-900/30"
               >
-                Sair sem Registrar
+                Desistir e Sair
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sair da Tela Cheia Confirmation Modal */}
+      {showExitFullscreenConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs">
+          <div className="w-full max-w-md p-6 rounded-3xl bg-slate-900 border-2 border-rose-500/40 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30 shrink-0">
+                <ShieldAlert className="w-6 h-6 text-rose-400" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-white">
+                  Sair da Tela Cheia e Anular Prova?
+                </h4>
+                <p className="text-xs text-rose-300 font-medium">
+                  Protocolo Anti-Fraude Ativo
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-rose-950/50 border border-rose-500/40 text-rose-200 text-xs space-y-2">
+              <p className="font-bold flex items-center gap-1.5 text-rose-300">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>Atenção: Ação Irreversível</span>
+              </p>
+              <p className="text-[11px] text-rose-200/90 leading-relaxed">
+                Ao sair da tela cheia, a sua avaliação será <strong>imediatamente ANULADA e desclassificada</strong>, registrando nota zero (0%) no histórico.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowExitFullscreenConfirmModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold transition-all cursor-pointer shadow-md"
+              >
+                Permanecer na Prova (Tela Cheia)
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmExitFullscreen}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-rose-950 text-rose-300 hover:text-white text-xs font-bold transition-all cursor-pointer border border-rose-500/30"
+              >
+                Confirmar Saída e Anular
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen Initial Activation Modal / Overlay (if gesture was required by browser) */}
+      {showFullscreenPrompt && !isFullscreen && !isAnnulled && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+          <div className="w-full max-w-lg p-6 sm:p-8 rounded-3xl bg-slate-900 border border-indigo-500/40 shadow-2xl space-y-5 text-center">
+            <div className="w-16 h-16 mx-auto rounded-3xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shadow-lg">
+              <Maximize2 className="w-8 h-8 text-indigo-400" />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[10px] px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-bold uppercase">
+                Ambiente Seguro de Prova
+              </span>
+              <h3 className="text-lg sm:text-xl font-bold text-white">
+                Iniciar Avaliação em Modo Tela Cheia
+              </h3>
+              <p className="text-xs text-slate-300 max-w-md mx-auto leading-relaxed">
+                Para garantir a integridade da prova e maximizar a visualização das questões e alternativas, o questionário será executado em <strong>Tela Cheia</strong>.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 text-left text-xs space-y-1 text-slate-300">
+              <p className="font-bold text-amber-400 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>Regras de Segurança:</span>
+              </p>
+              <ul className="list-disc list-inside text-[11px] text-slate-400 space-y-0.5 pl-1">
+                <li>Sair do modo tela cheia anula imediatamente o questionário</li>
+                <li>Trocar de aba ou minimizar a janela cancela a prova</li>
+                <li>As abas e cabeçalhos serão minimizados durante a resolução</li>
+              </ul>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleManualEnterFullscreen}
+              className="w-full py-3.5 px-6 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-sm font-black flex items-center justify-center gap-2 shadow-xl shadow-indigo-950/60 transition-all cursor-pointer ring-1 ring-indigo-400/50"
+            >
+              <Maximize2 className="w-4 h-4" />
+              <span>Entrar em Tela Cheia e Iniciar Prova</span>
+            </button>
           </div>
         </div>
       )}

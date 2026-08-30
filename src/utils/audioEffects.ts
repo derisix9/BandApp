@@ -122,3 +122,33 @@ export function playTimeoutAlertSound(): void {
     osc.stop(now + delay + 0.07);
   });
 }
+
+/**
+ * Plays a distinct warning buzzer when an anti-fraud security infraction occurs.
+ */
+export function playSecurityAlarmSound(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const now = ctx.currentTime;
+
+  [0, 0.18].forEach((delay) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(180, now + delay);
+    osc.frequency.exponentialRampToValueAtTime(120, now + delay + 0.14);
+
+    gain.gain.setValueAtTime(0.001, now + delay);
+    gain.gain.exponentialRampToValueAtTime(0.25, now + delay + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.14);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now + delay);
+    osc.stop(now + delay + 0.14);
+  });
+}
+

@@ -1,4 +1,9 @@
 import { Quiz, OptionLetter, UserAccount } from "../types";
+import {
+  getPointsPerQuestion,
+  calculateQuizPoints,
+  formatQuizPoints,
+} from "./scoring";
 
 export interface PerformanceCardData {
   quiz: Quiz;
@@ -7,6 +12,8 @@ export interface PerformanceCardData {
   totalQuestions: number;
   user?: UserAccount | null;
   completionDate?: Date;
+  earnedPoints?: number;
+  pointsPerQuestion?: number;
 }
 
 /**
@@ -18,6 +25,9 @@ export async function generatePerformanceCardImageBlob(
 ): Promise<{ blob: Blob; dataUrl: string }> {
   const { quiz, scorePercent, correctCount, totalQuestions, user } = data;
   const errorCount = totalQuestions - correctCount;
+  const ptsPerQ = data.pointsPerQuestion ?? getPointsPerQuestion(totalQuestions);
+  const roundPoints = data.earnedPoints ?? calculateQuizPoints(correctCount, totalQuestions);
+
   const studentName = user?.displayName || user?.email?.split("@")[0] || "Estudante BandApp";
   const dateStr = (data.completionDate || new Date()).toLocaleDateString("pt-BR", {
     day: "2-digit",
@@ -152,10 +162,10 @@ export async function generatePerformanceCardImageBlob(
   const truncatedTitle = quiz.title.length > 55 ? quiz.title.slice(0, 52) + "..." : quiz.title;
   ctx.fillText(truncatedTitle, 60, 276);
 
-  // Subtitle / Date
+  // Subtitle / Date + Round Score
   ctx.font = "14px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
   ctx.fillStyle = "#94a3b8";
-  ctx.fillText(`Concluído em: ${dateStr} • ${totalQuestions} Questões de Múltipla Escolha`, 60, 304);
+  ctx.fillText(`Concluído em: ${dateStr} • ${totalQuestions} Questões • +${formatQuizPoints(roundPoints)} pts na rodada`, 60, 304);
 
   // 6. Center-Right: Big Circular Score Display
   const circleCenterX = 920;
@@ -242,7 +252,7 @@ export async function generatePerformanceCardImageBlob(
   ctx.fillText(ratingText, circleCenterX, circleCenterY + circleRadius + 41);
   ctx.restore();
 
-  // 7. Left-Bottom Stats Grid (3 Bento Cards)
+  // 7. Left-Bottom Stats Grid (3 Bento Cards: Acertos, Pontos da Rodada, Erros)
   const cardY = 345;
   const cardH = 150;
   const cardW = 205;
@@ -257,24 +267,24 @@ export async function generatePerformanceCardImageBlob(
     border: "rgba(16, 185, 129, 0.4)",
   });
 
-  // Card 2: Erros
+  // Card 2: Pontuação Conquistada nesta Rodada
   drawStatBox(ctx, 280, cardY, cardW, cardH, {
+    title: "PONTOS DA RODADA",
+    val: `+${formatQuizPoints(roundPoints)}`,
+    sub: `${correctCount} × ${formatQuizPoints(ptsPerQ)} pts`,
+    color: "#f59e0b",
+    bg: "rgba(120, 53, 15, 0.3)",
+    border: "rgba(245, 158, 11, 0.4)",
+  });
+
+  // Card 3: Erros
+  drawStatBox(ctx, 500, cardY, cardW, cardH, {
     title: "ERROS",
     val: `${errorCount}`,
     sub: errorCount === 0 ? "Gabarito Perfeito!" : "Para revisar",
     color: errorCount === 0 ? "#94a3b8" : "#fb7185",
     bg: errorCount === 0 ? "rgba(30, 41, 59, 0.3)" : "rgba(136, 19, 55, 0.3)",
     border: errorCount === 0 ? "rgba(51, 65, 85, 0.4)" : "rgba(244, 63, 94, 0.4)",
-  });
-
-  // Card 3: Formato
-  drawStatBox(ctx, 500, cardY, cardW, cardH, {
-    title: "SISTEMA",
-    val: "A • B • C • D",
-    sub: "4 Opções por questão",
-    color: "#818cf8",
-    bg: "rgba(49, 46, 129, 0.3)",
-    border: "rgba(99, 102, 241, 0.4)",
   });
 
   // 8. Bottom Footer Bar: Social Call to Action / Branding Watermark

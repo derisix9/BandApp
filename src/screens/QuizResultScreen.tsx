@@ -83,7 +83,7 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
   const [viewMode, setViewMode] = useState<ViewMode>("side-by-side");
 
   const pointsPerQ = getPointsPerQuestion(totalQuestions);
-  const earnedPoints = calculateQuizPoints(totalQuestions, correctCount);
+  const earnedPoints = calculateQuizPoints(correctCount, totalQuestions);
   const phaseInfo = getQuizPhaseInfo(totalQuestions);
 
   // Phase breakdown for 2-phase quizzes
@@ -135,6 +135,8 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
         correctCount,
         userAnswers,
         userEmail: currentUser?.email || "Estudante BandApp",
+        earnedPoints,
+        pointsPerQuestion: pointsPerQ,
       });
       setPdfSuccess(true);
       setTimeout(() => setPdfSuccess(false), 3000);
@@ -150,7 +152,8 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
     text += `Categoria: ${quiz.category}\n`;
     text += `Total de Questões: ${totalQuestions}\n`;
     text += `Sistema Americano (4 opções: A, B, C, D | 1 correta)\n`;
-    text += `Aproveitamento: ${scorePercent}% (${correctCount}/${totalQuestions} acertos)\n\n`;
+    text += `Aproveitamento: ${scorePercent}% (${correctCount}/${totalQuestions} acertos)\n`;
+    text += `Pontuação da Rodada: +${formatQuizPoints(earnedPoints)} pts (${correctCount} acertos × ${formatQuizPoints(pointsPerQ)} pts/acerto)\n\n`;
     text += `--------------------------------------------------\n\n`;
 
     questions.forEach((q, idx) => {
@@ -195,6 +198,8 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
         totalQuestions,
         user: currentUser,
         completionDate: new Date(),
+        earnedPoints,
+        pointsPerQuestion: pointsPerQ,
       });
       setCardBlob(blob);
       setCardDataUrl(dataUrl);
@@ -230,7 +235,7 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
       try {
         await navigator.share({
           title: `Meu Desempenho no BandApp: ${quiz.title}`,
-          text: `Concluí a avaliação "${quiz.title}" no BandApp com ${scorePercent}% de aproveitamento (${correctCount}/${totalQuestions} acertos)!`,
+          text: `Concluí a avaliação "${quiz.title}" no BandApp com ${scorePercent}% de aproveitamento (+${formatQuizPoints(earnedPoints)} pts na rodada - ${correctCount}/${totalQuestions} acertos)!`,
           files: [file],
         });
         setShareFeedbackMsg("Compartilhado com sucesso!");
@@ -373,17 +378,19 @@ export const QuizResultScreen: React.FC<QuizResultScreenProps> = ({
           {/* Points Earned & Phase Breakdown Card */}
           <div className="max-w-md mx-auto p-4 rounded-3xl bg-slate-950/80 border border-slate-800 space-y-3 text-left shadow-inner">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">
                   <Trophy className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-extrabold text-white">Pontuação Conquistada</h4>
-                  <p className="text-[10px] text-slate-400">Escala de {formatQuizPoints(pointsPerQ)} pts por acerto</p>
+                  <h4 className="text-xs font-black text-white">Pontuação Desta Rodada</h4>
+                  <p className="text-[10px] text-slate-400">
+                    {correctCount} acertos × +{formatQuizPoints(pointsPerQ)} pts/questão
+                  </p>
                 </div>
               </div>
               <div className="text-right">
-                <span className="text-lg font-black text-amber-400">+{formatQuizPoints(earnedPoints)}</span>
+                <span className="text-xl font-black text-amber-400">+{formatQuizPoints(earnedPoints)}</span>
                 <span className="text-[10px] text-slate-400 ml-1">pts</span>
               </div>
             </div>

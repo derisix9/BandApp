@@ -244,7 +244,7 @@ export default function App() {
 
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden ${theme === "light" ? "theme-light light" : "dark"} bg-slate-950 text-slate-100 antialiased font-sans flex flex-col selection:bg-indigo-500 selection:text-white transition-colors duration-200`}>
-      {activeScreen !== "auth" && (
+      {activeScreen !== "auth" && activeScreen !== "play_quiz" && (
         <Header
           title={headerTitle}
           subtitle={headerSubtitle}
@@ -349,6 +349,7 @@ export default function App() {
             currentUser={currentUser}
             quizzes={quizzes}
             theme={theme}
+            onRefreshQuizzes={refreshQuizzes}
             onThemeChange={(newTheme) => {
               setTheme(newTheme);
               saveStoredTheme(newTheme);
