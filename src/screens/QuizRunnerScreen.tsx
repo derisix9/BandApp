@@ -27,9 +27,12 @@ import {
   AlertOctagon,
   LogOut,
   Ban,
+  Sun,
 } from "lucide-react";
-import { Quiz, OptionLetter } from "../types";
+import { Quiz, OptionLetter, Question } from "../types";
 import { OptionCard } from "../components/OptionCard";
+import { shuffleQuizSessionQuestions } from "../utils/quizRandomizer";
+import { screenWakeLock } from "../utils/screenWakeLock";
 import {
   playCorrectSound,
   playIncorrectSound,
@@ -96,7 +99,8 @@ interface QuizRunnerScreenProps {
     scorePercent: number,
     correctCount: number,
     answers: Record<number, OptionLetter>,
-    timeSpentSeconds?: number
+    timeSpentSeconds?: number,
+    sessionQuiz?: Quiz
   ) => void;
   onNavigateBack: () => void;
 }
@@ -106,10 +110,17 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   onFinishQuiz,
   onNavigateBack,
 }) => {
+  // Randomize question order AND options (A, B, C, D) dynamically for this game session,
+  // mapping the correct option letter so answers remain 100% accurate, without
+  // mutating the permanent stored database/localStorage quiz.
+  const [sessionQuestions] = useState<Question[]>(() => {
+    return shuffleQuizSessionQuestions(quiz.questions || []);
+  });
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState<Record<number, OptionLetter>>({});
-  // Lightning Mode (Raio): When TRUE -> Instant feedback, sound effects, and answer lock.
-  // When FALSE -> Free Mode: No sound, no answer reveal, user can freely change answers.
+  // Lightning Mode (Raio): When TRUE -> Instant feedback, sound effects, answer lock & auto-advance.
+  // When FALSE -> Free Mode: No sound, no answer reveal, prev/next buttons visible, user can freely change answers.
   const [showInstantExplanation, setShowInstantExplanation] = useState(true);
   const [showQuestionGrid, setShowQuestionGrid] = useState(false);
   const [showUnansweredWarning, setShowUnansweredWarning] = useState(false);
@@ -117,6 +128,9 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   const [questionAutoAdvanceNotice, setQuestionAutoAdvanceNotice] = useState<string | null>(null);
   const [showPhaseTransitionModal, setShowPhaseTransitionModal] = useState(false);
   const [selectedGridPhase, setSelectedGridPhase] = useState<1 | 2>(1);
+
+  // Auto-advance timer ref
+  const autoAdvanceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
   // Fullscreen & Anti-fraud Security States
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -126,7 +140,10 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   const [showExitFullscreenConfirmModal, setShowExitFullscreenConfirmModal] = useState(false);
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
 
-  const questions = quiz.questions || [];
+  // Screen Wake Lock: Keeps the mobile or PC screen active and prevents sleep/auto-lock during quiz
+  const [isWakeLockActive, setIsWakeLockActive] = useState(false);
+
+  const questions = sessionQuestions;
   const pointsPerQuestion = getPointsPerQuestion(questions.length);
   const phaseInfo = getQuizPhaseInfo(questions.length);
   const currentPhase = getCurrentPhase(currentIndex, questions.length);
@@ -190,6 +207,27 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
       exitFullScreenMode();
     };
   }, []);
+
+  // 2. Universal Screen Wake Lock: Keeps the mobile or PC screen awake and prevents screen lock/sleep
+  useEffect(() => {
+    if (isAnnulled) {
+      screenWakeLock.disable();
+      return;
+    }
+
+    // Subscribe to wake lock status updates
+    const unsubscribe = screenWakeLock.subscribe((active) => {
+      setIsWakeLockActive(active);
+    });
+
+    // Request wake lock (Native + NoSleep fallback)
+    screenWakeLock.enable();
+
+    return () => {
+      unsubscribe();
+      screenWakeLock.disable();
+    };
+  }, [isAnnulled]);
 
   // 2. Anti-fraud Security Monitor: Fullscreen exit, Tab visibility, Window blur & Anti-cheating
   useEffect(() => {
@@ -282,6 +320,11 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
     if (isIndividualTimer) {
       setQuestionSecondsRemaining(configuredDurationSeconds);
     }
+    return () => {
+      if (autoAdvanceTimerRef.current) {
+        clearTimeout(autoAdvanceTimerRef.current);
+      }
+    };
   }, [currentIndex, isIndividualTimer, configuredDurationSeconds]);
 
   // Main countdown timer ticker
@@ -342,8 +385,53 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
     }
   }, [timeExpired, isAnnulled]);
 
-  // Annulled Screen View
+  const handleFinishWithAnswers = (finalAnswers: Record<number, OptionLetter>) => {
+    setIsSecurityActive(false);
+    exitFullScreenMode();
+    screenWakeLock.disable();
+
+    let correct = 0;
+    questions.forEach((q, idx) => {
+      const chosen = finalAnswers[idx];
+      if (chosen && chosen.toUpperCase() === q.correctOption.toUpperCase()) {
+        correct++;
+      }
+    });
+
+    const percent = questions.length > 0 ? Math.round((correct / questions.length) * 100) : 0;
+    const timeSpent = isTimed
+      ? !isIndividualTimer
+        ? Math.max(1, configuredDurationSeconds - generalSecondsRemaining)
+        : Math.max(1, elapsedSeconds)
+      : Math.max(1, elapsedSeconds);
+
+    const sessionQuiz: Quiz = {
+      ...quiz,
+      questions,
+    };
+
+    onFinishQuiz(percent, correct, finalAnswers, timeSpent, sessionQuiz);
+  };
+
+  // Annulled Screen View: Preserve partial score up to interruption
   if (isAnnulled) {
+    let partialCorrect = 0;
+    let partialAnswered = 0;
+    questions.forEach((q, idx) => {
+      const chosen = userAnswers[idx];
+      if (chosen) {
+        partialAnswered++;
+        if (chosen.toUpperCase() === q.correctOption.toUpperCase()) {
+          partialCorrect++;
+        }
+      }
+    });
+
+    const partialScorePercent =
+      questions.length > 0
+        ? Math.round((partialCorrect / questions.length) * 100)
+        : 0;
+
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950 text-white select-none">
         <div className="max-w-lg w-full p-6 sm:p-8 rounded-3xl bg-slate-900 border-2 border-rose-600/70 shadow-2xl shadow-rose-950/80 space-y-6 text-center animate-in fade-in zoom-in duration-200">
@@ -356,10 +444,10 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
               Segurança Anti-Fraude
             </span>
             <h2 className="text-xl sm:text-2xl font-black text-rose-400 tracking-tight">
-              AVALIAÇÃO ANULADA
+              AVALIAÇÃO INTERROMPIDA
             </h2>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Esta prova foi cancelada e desclassificada devido a uma violação das diretrizes de segurança.
+              A avaliação foi encerrada por detecção de infração de segurança (saída de tela cheia ou perda de foco). Sua nota foi calculada até as questões respondidas.
             </p>
           </div>
 
@@ -376,19 +464,33 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
           <div className="grid grid-cols-2 gap-3 text-left text-xs">
             <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800">
               <span className="text-[10px] text-slate-400 font-bold uppercase">Nota Atribuída</span>
-              <p className="text-lg font-black text-rose-400 mt-0.5">0% (0 acertos)</p>
+              <p className="text-xl font-black text-amber-400 mt-0.5">{partialScorePercent}%</p>
+              <span className="text-[10px] text-slate-400">
+                {partialCorrect} {partialCorrect === 1 ? "acerto" : "acertos"} ({partialAnswered}/{questions.length} respondidas)
+              </span>
             </div>
             <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800">
               <span className="text-[10px] text-slate-400 font-bold uppercase">Status</span>
               <p className="text-sm font-black text-amber-400 mt-1">Desclassificado</p>
+              <span className="text-[10px] text-slate-400">Acertos parciais preservados</span>
             </div>
           </div>
 
-          <div className="pt-2">
+          <div className="pt-2 space-y-2.5">
             <button
               type="button"
+              id="quiz-annulled-review-btn"
+              onClick={() => handleFinishWithAnswers(userAnswers)}
+              className="w-full py-3.5 px-5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-98 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Ver Gabarito e Relatório Parcial ({partialScorePercent}%)</span>
+            </button>
+            <button
+              type="button"
+              id="quiz-annulled-exit-btn"
               onClick={onNavigateBack}
-              className="w-full py-3.5 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-98 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 border border-slate-700 hover:border-slate-600 transition-all cursor-pointer shadow-lg"
+              className="w-full py-3 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-98 text-slate-300 hover:text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 hover:border-slate-600 transition-all cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
               <span>Voltar para a Página Inicial</span>
@@ -436,7 +538,13 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
     setShowUnansweredWarning(false);
     const isCorrect = letter.toUpperCase() === currentQuestion.correctOption.toUpperCase();
 
-    // Sound & Confetti feedback ONLY when Lightning Mode is active
+    const nextAnswers: Record<number, OptionLetter> = {
+      ...userAnswers,
+      [currentIndex]: letter,
+    };
+    setUserAnswers(nextAnswers);
+
+    // Sound, Confetti & Auto-Advance ONLY when Lightning Mode is active
     if (showInstantExplanation) {
       if (isCorrect) {
         playCorrectSound();
@@ -451,13 +559,21 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
       } else {
         playIncorrectSound();
       }
-    }
 
-    // In Free Mode or on first pick in Lightning Mode, update selected answer
-    setUserAnswers((prev) => ({
-      ...prev,
-      [currentIndex]: letter,
-    }));
+      // Auto-advance automatically to next question or transition/finish
+      if (autoAdvanceTimerRef.current) {
+        clearTimeout(autoAdvanceTimerRef.current);
+      }
+      autoAdvanceTimerRef.current = setTimeout(() => {
+        if (phaseInfo.hasPhases && currentIndex === 99 && !nextAnswers[100]) {
+          setShowPhaseTransitionModal(true);
+        } else if (currentIndex < questions.length - 1) {
+          setCurrentIndex((prev) => prev + 1);
+        } else if (currentIndex === questions.length - 1) {
+          handleFinishWithAnswers(nextAnswers);
+        }
+      }, 1350);
+    }
   };
 
   const handleNext = () => {
@@ -518,25 +634,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
       return;
     }
 
-    setIsSecurityActive(false);
-    exitFullScreenMode();
-
-    let correct = 0;
-    questions.forEach((q, idx) => {
-      const chosen = userAnswers[idx];
-      if (chosen && chosen.toUpperCase() === q.correctOption.toUpperCase()) {
-        correct++;
-      }
-    });
-
-    const percent = questions.length > 0 ? Math.round((correct / questions.length) * 100) : 0;
-    const timeSpent = isTimed
-      ? !isIndividualTimer
-        ? Math.max(1, configuredDurationSeconds - generalSecondsRemaining)
-        : Math.max(1, elapsedSeconds)
-      : Math.max(1, elapsedSeconds);
-
-    onFinishQuiz(percent, correct, userAnswers, timeSpent);
+    handleFinishWithAnswers(userAnswers);
   };
 
   const options: { letter: OptionLetter; text: string }[] = [
@@ -572,6 +670,33 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
             <span>+{formatQuizPoints(pointsPerQuestion)} pts/acerto</span>
           </span>
+
+          <button
+            type="button"
+            id="quiz-wakelock-toggle-btn"
+            onClick={() => {
+              screenWakeLock.toggle();
+            }}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl font-bold transition-all cursor-pointer ${
+              isWakeLockActive
+                ? "bg-amber-500/15 border border-amber-500/30 text-amber-300 shadow-xs hover:bg-amber-500/25"
+                : "bg-slate-800/80 border border-slate-700/80 text-slate-400 hover:text-amber-300 hover:border-amber-500/40"
+            }`}
+            title={
+              isWakeLockActive
+                ? "Tela Sempre Ligada: Ativa (Seu celular ou PC não irá bloquear nem apagar durante a prova. Clique para desativar)"
+                : "Clique para Ativar Tela Sempre Ligada (Evita que o celular ou PC apague ou bloqueie)"
+            }
+          >
+            <Sun
+              className={`w-3.5 h-3.5 ${
+                isWakeLockActive
+                  ? "text-amber-400 fill-amber-400/40 animate-pulse"
+                  : "text-slate-400"
+              }`}
+            />
+            <span>{isWakeLockActive ? "Tela Ligada" : "Ativar Tela Ligada"}</span>
+          </button>
         </div>
 
         {/* Dedicated Sair da Tela Cheia Button */}
@@ -1158,70 +1283,111 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
       {/* Bottom Sticky Control Bar */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 backdrop-blur border-t border-slate-800 px-4 py-3 shadow-2xl">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
-          <button
-            id="quiz-prev-btn"
-            type="button"
-            onClick={handlePrevious}
-            disabled={currentIndex === 0}
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none text-slate-200 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            <span>Anterior</span>
-          </button>
+          {showInstantExplanation ? (
+            /* Lightning Mode (Raio Ativo): Dispensar botões de Anterior e Próxima, avanço é 100% automático */
+            <div className="w-full flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 font-extrabold text-xs flex items-center gap-2 shadow-xs">
+                  <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400 animate-pulse" />
+                  <span>Modo Raio: Avanço Automático ao Responder</span>
+                </span>
+              </div>
 
-          {/* Center Selection Status */}
-          <div className="hidden sm:flex items-center gap-1.5 text-xs font-bold">
-            {selectedAnswer ? (
-              <span className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                Alternativa {selectedAnswer} selecionada
-              </span>
-            ) : (
-              <span className="px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 flex items-center gap-1.5 animate-pulse">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-                Selecione uma opção para avançar
-              </span>
-            )}
-          </div>
+              <div className="flex items-center gap-3">
+                {selectedAnswer ? (
+                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Opção {selectedAnswer} registrada</span>
+                  </span>
+                ) : (
+                  <span className="text-xs font-medium text-amber-400/90 animate-pulse flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Selecione uma opção</span>
+                  </span>
+                )}
 
-          {currentIndex === questions.length - 1 ? (
-            <button
-              id="quiz-finish-btn"
-              type="button"
-              onClick={handleFinish}
-              className={`px-6 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-lg transition-all cursor-pointer ${
-                selectedAnswer
-                  ? "bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white shadow-emerald-600/30 ring-1 ring-emerald-400/40"
-                  : "bg-slate-800 text-slate-400 border border-slate-700 hover:border-amber-500/60 hover:text-amber-300"
-              }`}
-              title={!selectedAnswer ? "Selecione uma resposta antes de finalizar" : "Finalizar e ver resultado"}
-            >
-              {selectedAnswer ? (
-                <Check className="w-4 h-4" />
-              ) : (
-                <Lock className="w-3.5 h-3.5 text-amber-400/80" />
-              )}
-              <span>Finalizar e Ver Resultado</span>
-            </button>
+                {currentIndex === questions.length - 1 && selectedAnswer && (
+                  <button
+                    id="quiz-finish-btn"
+                    type="button"
+                    onClick={handleFinish}
+                    className="px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white shadow-lg shadow-emerald-600/30 ring-1 ring-emerald-400/40 transition-all cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Finalizar Quiz</span>
+                  </button>
+                )}
+              </div>
+            </div>
           ) : (
-            <button
-              id="quiz-next-btn"
-              type="button"
-              onClick={handleNext}
-              className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer ${
-                selectedAnswer
-                  ? "bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white shadow-indigo-600/20 ring-1 ring-indigo-400/40"
-                  : "bg-slate-800 text-slate-400 border border-slate-700 hover:border-amber-500/60 hover:text-amber-300"
-              }`}
-              title={!selectedAnswer ? "Selecione uma resposta antes de prosseguir" : "Avançar para a próxima questão"}
-            >
-              <span>Próxima</span>
-              {selectedAnswer ? (
-                <ChevronRight className="w-4 h-4" />
+            /* Free Mode (Raio Desativado): Exibir botões Anterior e Próxima / Finalizar normalmente */
+            <>
+              <button
+                id="quiz-prev-btn"
+                type="button"
+                onClick={handlePrevious}
+                disabled={currentIndex === 0}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none text-slate-200 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Anterior</span>
+              </button>
+
+              {/* Center Selection Status */}
+              <div className="hidden sm:flex items-center gap-1.5 text-xs font-bold">
+                {selectedAnswer ? (
+                  <span className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    Alternativa {selectedAnswer} selecionada
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 flex items-center gap-1.5 animate-pulse">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                    Selecione uma opção para avançar
+                  </span>
+                )}
+              </div>
+
+              {currentIndex === questions.length - 1 ? (
+                <button
+                  id="quiz-finish-btn"
+                  type="button"
+                  onClick={handleFinish}
+                  className={`px-6 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-lg transition-all cursor-pointer ${
+                    selectedAnswer
+                      ? "bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white shadow-emerald-600/30 ring-1 ring-emerald-400/40"
+                      : "bg-slate-800 text-slate-400 border border-slate-700 hover:border-amber-500/60 hover:text-amber-300"
+                  }`}
+                  title={!selectedAnswer ? "Selecione uma resposta antes de finalizar" : "Finalizar e ver resultado"}
+                >
+                  {selectedAnswer ? (
+                    <Check className="w-4 h-4" />
+                  ) : (
+                    <Lock className="w-3.5 h-3.5 text-amber-400/80" />
+                  )}
+                  <span>Finalizar e Ver Resultado</span>
+                </button>
               ) : (
-                <Lock className="w-3.5 h-3.5 text-amber-400/80" />
+                <button
+                  id="quiz-next-btn"
+                  type="button"
+                  onClick={handleNext}
+                  className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer ${
+                    selectedAnswer
+                      ? "bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white shadow-indigo-600/20 ring-1 ring-indigo-400/40"
+                      : "bg-slate-800 text-slate-400 border border-slate-700 hover:border-amber-500/60 hover:text-amber-300"
+                  }`}
+                  title={!selectedAnswer ? "Selecione uma resposta antes de prosseguir" : "Avançar para a próxima questão"}
+                >
+                  <span>Próxima</span>
+                  {selectedAnswer ? (
+                    <ChevronRight className="w-4 h-4" />
+                  ) : (
+                    <Lock className="w-3.5 h-3.5 text-amber-400/80" />
+                  )}
+                </button>
               )}
-            </button>
+            </>
           )}
         </div>
       </div>

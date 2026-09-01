@@ -4,10 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>BandApp — Questionários no Sistema Americano</title>
-    <meta name="description" content="Crie questionários de múltipla escolha (15 a 50 perguntas) no sistema americano com IA a partir de PDF, TXT ou Imagens, com prevenção inteligente de duplicatas." />
+    <meta name="description" content="Crie questionários de múltipla escolha (15 a 50+ perguntas) no sistema americano a partir de PDF, Word (.docx / .doc), Imagens ou importação direta via JSON sem IA, com prevenção inteligente de duplicatas." />
+    <meta property="og:title" content="BandApp — Questionários no Sistema Americano" />
+    <meta property="og:description" content="Crie questionários de múltipla escolha (15 a 50+ perguntas) no sistema americano a partir de PDF, Word (.docx / .doc), Imagens ou importação direta via JSON sem IA, com prevenção inteligente de duplicatas." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <script>
+      // Safe guard against iframe permissions-policy rejection on wakeLock
+      if (typeof navigator !== 'undefined' && navigator.wakeLock && typeof navigator.wakeLock.request === 'function') {
+        try {
+          const _origWakeLock = navigator.wakeLock.request.bind(navigator.wakeLock);
+          navigator.wakeLock.request = async function (type) {
+            try {
+              return await _origWakeLock(type);
+            } catch (err) {
+              return {
+                released: false,
+                type: type || 'screen',
+                release: async function () {},
+                addEventListener: function () {},
+                removeEventListener: function () {},
+                dispatchEvent: function () { return true; }
+              };
+            }
+          };
+        } catch (_) {}
+      }
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased min-h-screen">
     <div id="root"></div>

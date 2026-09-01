@@ -29,6 +29,7 @@ import {
   listenToAuthChanges,
   logoutUser,
 } from "./lib/quizService";
+import { screenWakeLock } from "./utils/screenWakeLock";
 import { Loader2 } from "lucide-react";
 
 export default function App() {
@@ -46,6 +47,7 @@ export default function App() {
     scorePercent: number;
     correctCount: number;
     userAnswers: Record<number, OptionLetter>;
+    sessionQuiz?: Quiz;
   } | null>(null);
 
   // 1. Initialize and sync theme with DOM
@@ -91,12 +93,14 @@ export default function App() {
   };
 
   const handleStartQuiz = (quizId: number) => {
+    screenWakeLock.enable();
     setActiveQuizId(quizId);
     setQuizResult(null);
     setActiveScreen("play_quiz");
   };
 
   const handleQuizCreated = async (newQuizId: number) => {
+    screenWakeLock.enable();
     await refreshQuizzes();
     setActiveQuizId(newQuizId);
     setQuizResult(null);
@@ -133,7 +137,8 @@ export default function App() {
     scorePercent: number,
     correctCount: number,
     answers: Record<number, OptionLetter>,
-    timeSpentSeconds: number = 120
+    timeSpentSeconds: number = 120,
+    sessionQuiz?: Quiz
   ) => {
     if (activeQuizId) {
       const current = quizzes.find((q) => q.id === activeQuizId);
@@ -170,6 +175,7 @@ export default function App() {
       scorePercent,
       correctCount,
       userAnswers: answers,
+      sessionQuiz,
     });
     setActiveScreen("result_quiz");
   };
@@ -310,7 +316,7 @@ export default function App() {
 
         {activeScreen === "result_quiz" && activeQuiz && quizResult && (
           <QuizResultScreen
-            quiz={activeQuiz}
+            quiz={quizResult.sessionQuiz || activeQuiz}
             scorePercent={quizResult.scorePercent}
             correctCount={quizResult.correctCount}
             userAnswers={quizResult.userAnswers}
