@@ -116,6 +116,7 @@ export type ActiveScreen =
   | "play_quiz"
   | "result_quiz"
   | "question_bank"
+  | "pdf_export"
   | "leaderboard"
   | "settings"
   | "auth";

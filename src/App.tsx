@@ -8,6 +8,7 @@ import { QuizResultScreen } from "./screens/QuizResultScreen";
 import { QuestionBankScreen } from "./screens/QuestionBankScreen";
 import { LeaderboardScreen } from "./screens/LeaderboardScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import { AdminPdfExportScreen } from "./screens/AdminPdfExportScreen";
 import { AuthScreen } from "./screens/AuthScreen";
 import {
   getCategories,
@@ -265,6 +266,10 @@ export default function App() {
       headerTitle = "Placar dos Estudantes";
       headerSubtitle = "Top 10 • Pontuação Acumulada & Precisão";
       break;
+    case "pdf_export":
+      headerTitle = "Exportação de PDF & Gabarito";
+      headerSubtitle = "Gere apostilas, cadernos de prova e folhas de respostas";
+      break;
     case "settings":
       headerTitle = "Configurações & Firebase";
       headerSubtitle = `${currentUser.email} • ${currentUser.role === "admin" ? "Admin" : "Estudante"}`;
@@ -382,6 +387,16 @@ export default function App() {
                 setActiveScreen("home");
               }
             }}
+          />
+        )}
+
+        {activeScreen === "pdf_export" && (
+          <AdminPdfExportScreen
+            quizzes={quizzes}
+            currentUserRole={currentUser.role}
+            currentUserEmail={currentUser.email}
+            theme={theme}
+            onNavigateBack={() => setActiveScreen("home")}
           />
         )}
 

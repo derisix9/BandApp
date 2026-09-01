@@ -310,7 +310,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto shrink-0">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto shrink-0 flex-wrap">
+              <button
+                id="hero-pdf-export-btn"
+                type="button"
+                onClick={() => onNavigate("pdf_export")}
+                className="px-4 py-3 rounded-2xl bg-emerald-950/80 hover:bg-emerald-900/90 active:scale-95 text-emerald-200 hover:text-white border border-emerald-500/40 font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer"
+                title="Exportar Simulado Completo em PDF com Gabarito e Explicações"
+              >
+                <FileDown className="w-4 h-4 text-emerald-400" />
+                <span>Gerar PDF</span>
+              </button>
+
               <button
                 id="hero-question-bank-btn"
                 type="button"
@@ -687,6 +698,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
                     {isAdmin ? (
                       <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          id={`export-pdf-quiz-${quiz.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNavigate("pdf_export");
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-cyan-300 hover:bg-slate-800/80 rounded-xl transition-colors cursor-pointer"
+                          title="Gerar PDF deste Quiz"
+                        >
+                          <FileDown className="w-4 h-4" />
+                        </button>
                         <button
                           type="button"
                           id={`append-json-quiz-${quiz.id}`}

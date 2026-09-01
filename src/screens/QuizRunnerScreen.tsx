@@ -127,7 +127,8 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
   const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const [questionAutoAdvanceNotice, setQuestionAutoAdvanceNotice] = useState<string | null>(null);
   const [showPhaseTransitionModal, setShowPhaseTransitionModal] = useState(false);
-  const [selectedGridPhase, setSelectedGridPhase] = useState<1 | 2>(1);
+  const [transitionPhaseTarget, setTransitionPhaseTarget] = useState<number>(2);
+  const [selectedGridPhase, setSelectedGridPhase] = useState<number>(1);
 
   // Auto-advance timer ref
   const autoAdvanceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -398,7 +399,16 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
       }
     });
 
-    const percent = questions.length > 0 ? Math.round((correct / questions.length) * 100) : 0;
+    const answeredIndices = Object.keys(finalAnswers).map(Number);
+    const totalAnsweredQuestions = answeredIndices.length;
+    // If the quiz was paused / concluded at Phase 2 (e.g. 200 questions answered out of 300 or 400),
+    // calculate score percentage based on the active answered set of questions.
+    const effectiveTotal =
+      totalAnsweredQuestions > 0 && totalAnsweredQuestions < questions.length
+        ? totalAnsweredQuestions
+        : questions.length;
+
+    const percent = effectiveTotal > 0 ? Math.round((correct / effectiveTotal) * 100) : 0;
     const timeSpent = isTimed
       ? !isIndividualTimer
         ? Math.max(1, configuredDurationSeconds - generalSecondsRemaining)
@@ -565,7 +575,14 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
         clearTimeout(autoAdvanceTimerRef.current);
       }
       autoAdvanceTimerRef.current = setTimeout(() => {
-        if (phaseInfo.hasPhases && currentIndex === 99 && !nextAnswers[100]) {
+        if (phaseInfo.hasPhases && currentIndex === 99 && questions.length > 100 && !nextAnswers[100]) {
+          setTransitionPhaseTarget(2);
+          setShowPhaseTransitionModal(true);
+        } else if (phaseInfo.hasPhases && currentIndex === 199 && questions.length > 200 && !nextAnswers[200]) {
+          setTransitionPhaseTarget(3);
+          setShowPhaseTransitionModal(true);
+        } else if (phaseInfo.hasPhases && currentIndex === 299 && questions.length > 300 && !nextAnswers[300]) {
+          setTransitionPhaseTarget(4);
           setShowPhaseTransitionModal(true);
         } else if (currentIndex < questions.length - 1) {
           setCurrentIndex((prev) => prev + 1);
@@ -585,8 +602,23 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
 
     setShowUnansweredWarning(false);
 
-    // If completing the last question of Phase 1 (index 99) in a 2-phase quiz, show celebration & transition modal
-    if (phaseInfo.hasPhases && currentIndex === 99 && !userAnswers[100]) {
+    // If completing the last question of Phase 1 (index 99), show celebration & transition modal to Phase 2
+    if (phaseInfo.hasPhases && currentIndex === 99 && questions.length > 100 && !userAnswers[100]) {
+      setTransitionPhaseTarget(2);
+      setShowPhaseTransitionModal(true);
+      return;
+    }
+
+    // If completing the last question of Phase 2 (index 199) in a 300/400 question quiz
+    if (phaseInfo.hasPhases && currentIndex === 199 && questions.length > 200 && !userAnswers[200]) {
+      setTransitionPhaseTarget(3);
+      setShowPhaseTransitionModal(true);
+      return;
+    }
+
+    // If completing the last question of Phase 3 (index 299) in a 400 question quiz
+    if (phaseInfo.hasPhases && currentIndex === 299 && questions.length > 300 && !userAnswers[300]) {
+      setTransitionPhaseTarget(4);
       setShowPhaseTransitionModal(true);
       return;
     }
@@ -596,9 +628,10 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
     }
   };
 
-  const handleStartPhase2 = () => {
+  const handleStartNextPhase = (targetPhase: number) => {
     setShowPhaseTransitionModal(false);
-    setCurrentIndex(100);
+    const targetIdx = (targetPhase - 1) * 100;
+    setCurrentIndex(targetIdx);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -658,7 +691,7 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
           {phaseInfo.hasPhases ? (
             <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700/60 text-slate-300 font-bold flex items-center gap-1.5 shadow-xs">
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Fase {currentPhase} de 2</span>
+              <span>Fase {currentPhase} de {phaseInfo.totalPhases}</span>
             </span>
           ) : (
             <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700/60 text-slate-300 font-medium">
@@ -844,46 +877,157 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Phase 1 Completion & Transition Celebration Modal */}
+      {/* Multi-Phase Transition & Continuation Modal */}
       {showPhaseTransitionModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 sm:p-7 max-w-md w-full space-y-4 shadow-2xl animate-in fade-in zoom-in duration-200 text-center">
+          <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-4 shadow-2xl animate-in fade-in zoom-in duration-200 text-center">
             <div className="w-16 h-16 rounded-3xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto border border-indigo-500/30 shadow-lg">
               <Sparkles className="w-8 h-8 text-amber-400" />
             </div>
 
-            <div className="space-y-1.5">
-              <span className="text-[10px] px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-bold uppercase">
-                Parabéns! Fase 1 Concluída
-              </span>
-              <h3 className="text-xl font-black text-white tracking-tight">
-                Você finalizou as primeiras 100 questões!
-              </h3>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Agora iniciaremos a <strong>Fase 2</strong> com as questões de <strong>101 a {questions.length}</strong>.
-              </p>
-            </div>
+            {/* Content when completing Phase 1 -> starting Phase 2 */}
+            {transitionPhaseTarget === 2 && (
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-[10px] px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-bold uppercase">
+                    Parabéns! Fase 1 Concluída
+                  </span>
+                  <h3 className="text-xl font-black text-white tracking-tight">
+                    Você finalizou as primeiras 100 questões!
+                  </h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Agora iniciaremos a <strong>Fase 2</strong> com as questões de <strong>101 a {Math.min(200, questions.length)}</strong>.
+                  </p>
+                </div>
 
-            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-400 space-y-1">
-              <div className="flex items-center justify-between text-white font-bold">
-                <span>Questões restantes:</span>
-                <span className="text-indigo-400 font-black">{questions.length - 100} questões</span>
-              </div>
-              <div className="flex items-center justify-between text-slate-400 text-[11px]">
-                <span>Pontos adicionais:</span>
-                <span className="text-amber-400 font-bold">+{formatQuizPoints(pointsPerQuestion)} pts cada</span>
-              </div>
-            </div>
+                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-400 space-y-1">
+                  <div className="flex items-center justify-between text-white font-bold">
+                    <span>Questões restantes no simulado:</span>
+                    <span className="text-indigo-400 font-black">{questions.length - 100} questões</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                    <span>Pontuação por acerto:</span>
+                    <span className="text-amber-400 font-bold">+{formatQuizPoints(pointsPerQuestion)} pts cada</span>
+                  </div>
+                </div>
 
-            <button
-              type="button"
-              id="start-phase-2-btn"
-              onClick={handleStartPhase2}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-extrabold text-sm shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
-            >
-              <span>Avançar e Iniciar Fase 2</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
+                <button
+                  type="button"
+                  id="start-phase-2-btn"
+                  onClick={() => handleStartNextPhase(2)}
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-extrabold text-sm shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                >
+                  <span>Avançar e Iniciar Fase 2</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </>
+            )}
+
+            {/* Content when completing Phase 2 on 300 or 400 questions quiz */}
+            {transitionPhaseTarget === 3 && (
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-[10px] px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold uppercase">
+                    Fases 1 e 2 Concluídas • 200 Questões
+                  </span>
+                  <h3 className="text-xl font-black text-white tracking-tight">
+                    Você concluiu as Fases 1 e 2 com sucesso!
+                  </h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Como este simulado possui <strong>{questions.length} questões</strong>, você pode escolher se deseja finalizar o quiz agora com o seu resultado de 200 questões ou dar sequência para as perguntas restantes (<strong>Fase 3{questions.length >= 400 ? " e 4" : ""}</strong>).
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/30 text-xs text-slate-300 text-left space-y-1.5 shadow-inner">
+                  <div className="flex items-center justify-between text-white font-bold">
+                    <span>Questões respondidas até aqui:</span>
+                    <span className="text-emerald-400 font-black">200 de {questions.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                    <span>Regra de Pontuação Contínua:</span>
+                    <span className="text-amber-400 font-bold">+{formatQuizPoints(pointsPerQuestion)} pts/acerto</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    id="finish-after-phase-2-btn"
+                    onClick={() => {
+                      setShowPhaseTransitionModal(false);
+                      handleFinishWithAnswers(userAnswers);
+                    }}
+                    className="py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 hover:border-slate-600 transition-all cursor-pointer"
+                  >
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span>Finalizar Simulado (200 Qs)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="continue-to-phase-3-btn"
+                    onClick={() => handleStartNextPhase(3)}
+                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs sm:text-sm shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                  >
+                    <span>Dar Sequência (Iniciar Fase 3)</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Content when completing Phase 3 on 400 questions quiz */}
+            {transitionPhaseTarget === 4 && (
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-[10px] px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold uppercase">
+                    Fases 1, 2 e 3 Concluídas • 300 Questões
+                  </span>
+                  <h3 className="text-xl font-black text-white tracking-tight">
+                    Você concluiu 300 questões!
+                  </h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Deseja finalizar o quiz agora com a sua nota de 300 questões ou dar sequência para a <strong>Fase 4 final (Questões 301 a 400)</strong>?
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/30 text-xs text-slate-300 text-left space-y-1.5 shadow-inner">
+                  <div className="flex items-center justify-between text-white font-bold">
+                    <span>Questões respondidas até aqui:</span>
+                    <span className="text-emerald-400 font-black">300 de {questions.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                    <span>Regra de Pontuação Contínua:</span>
+                    <span className="text-amber-400 font-bold">+{formatQuizPoints(pointsPerQuestion)} pts/acerto</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    id="finish-after-phase-3-btn"
+                    onClick={() => {
+                      setShowPhaseTransitionModal(false);
+                      handleFinishWithAnswers(userAnswers);
+                    }}
+                    className="py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 hover:border-slate-600 transition-all cursor-pointer"
+                  >
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span>Finalizar Simulado (300 Qs)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="continue-to-phase-4-btn"
+                    onClick={() => handleStartNextPhase(4)}
+                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs sm:text-sm shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                  >
+                    <span>Dar Sequência (Iniciar Fase 4)</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -905,31 +1049,23 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
               </button>
             </div>
 
-            {/* Phase Selector Tabs if 2 phases */}
+            {/* Dynamic Phase Selector Tabs */}
             {phaseInfo.hasPhases && (
-              <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-950 border border-slate-800 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setSelectedGridPhase(1)}
-                  className={`py-2 rounded-xl font-bold transition-all cursor-pointer ${
-                    selectedGridPhase === 1
-                      ? "bg-indigo-600 text-white shadow-xs"
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  Fase 1 (1 a 100)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedGridPhase(2)}
-                  className={`py-2 rounded-xl font-bold transition-all cursor-pointer ${
-                    selectedGridPhase === 2
-                      ? "bg-indigo-600 text-white shadow-xs"
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  Fase 2 (101 a {questions.length})
-                </button>
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 p-1 rounded-2xl bg-slate-950 border border-slate-800 text-xs">
+                {phaseInfo.phases.map((p) => (
+                  <button
+                    key={p.phaseNumber}
+                    type="button"
+                    onClick={() => setSelectedGridPhase(p.phaseNumber)}
+                    className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer text-xs ${
+                      selectedGridPhase === p.phaseNumber
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Fase {p.phaseNumber} ({p.startQuestion} a {p.endQuestion})
+                  </button>
+                ))}
               </div>
             )}
 
@@ -938,7 +1074,11 @@ export const QuizRunnerScreen: React.FC<QuizRunnerScreenProps> = ({
                 .map((q, idx) => ({ q, idx }))
                 .filter(({ idx }) => {
                   if (!phaseInfo.hasPhases) return true;
-                  return selectedGridPhase === 1 ? idx < 100 : idx >= 100;
+                  const currentPhaseObj = phaseInfo.phases.find(
+                    (p) => p.phaseNumber === selectedGridPhase
+                  );
+                  if (!currentPhaseObj) return true;
+                  return idx >= currentPhaseObj.startIndex && idx <= currentPhaseObj.endIndex;
                 })
                 .map(({ idx }) => {
                   const isAnswered = userAnswers[idx] !== undefined;
