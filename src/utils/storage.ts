@@ -556,6 +556,80 @@ export function saveQuizAttempt(record: QuizAttemptRecord): void {
   }
 }
 
+export function deleteQuestionFromStorage(
+  questionId: number,
+  quizId?: number
+): { success: boolean; updatedQuiz?: Quiz; removedFromQuizTitle?: string } {
+  const quizzes = getStoredQuizzes();
+  let foundQuiz: Quiz | null = null;
+  let removedFromTitle = "";
+
+  const updatedQuizzes = quizzes.map((quiz) => {
+    if (quizId && quiz.id !== quizId) return quiz;
+
+    const hasQuestion = (quiz.questions || []).some((q) => q.id === questionId);
+    if (!hasQuestion) return quiz;
+
+    foundQuiz = quiz;
+    removedFromTitle = quiz.title;
+    const remainingQuestions = (quiz.questions || []).filter((q) => q.id !== questionId);
+    return {
+      ...quiz,
+      questions: remainingQuestions,
+      questionCount: remainingQuestions.length,
+    };
+  });
+
+  if (foundQuiz) {
+    localStorage.setItem(STORAGE_KEYS.QUIZZES, JSON.stringify(updatedQuizzes));
+    const finalQuiz = updatedQuizzes.find((q) => q.id === (foundQuiz as Quiz).id);
+    return { success: true, updatedQuiz: finalQuiz, removedFromQuizTitle: removedFromTitle };
+  }
+
+  return { success: false };
+}
+
+export function deleteMultipleQuestionsFromStorage(
+  questionIds: number[]
+): { success: boolean; count: number; affectedQuizzes: Quiz[] } {
+  if (!questionIds || questionIds.length === 0) {
+    return { success: true, count: 0, affectedQuizzes: [] };
+  }
+
+  const idSet = new Set(questionIds);
+  const quizzes = getStoredQuizzes();
+  const affectedQuizzes: Quiz[] = [];
+  let deletedCount = 0;
+
+  const updatedQuizzes = quizzes.map((quiz) => {
+    const originalQuestions = quiz.questions || [];
+    const remainingQuestions = originalQuestions.filter((q) => !idSet.has(q.id));
+    const removedCount = originalQuestions.length - remainingQuestions.length;
+
+    if (removedCount > 0) {
+      deletedCount += removedCount;
+      const updatedQuiz: Quiz = {
+        ...quiz,
+        questions: remainingQuestions,
+        questionCount: remainingQuestions.length,
+      };
+      affectedQuizzes.push(updatedQuiz);
+      return updatedQuiz;
+    }
+    return quiz;
+  });
+
+  if (deletedCount > 0) {
+    localStorage.setItem(STORAGE_KEYS.QUIZZES, JSON.stringify(updatedQuizzes));
+  }
+
+  return {
+    success: true,
+    count: deletedCount,
+    affectedQuizzes,
+  };
+}
+
 export function getLeaderboardEntries(
   currentUser?: UserAccount | null,
   sortBy: "points" | "accuracy" | "completed" = "points"

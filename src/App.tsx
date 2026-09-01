@@ -28,6 +28,10 @@ import {
   saveQuizAttemptToFirestore,
   listenToAuthChanges,
   logoutUser,
+  deleteQuestionFromFirestoreAndStorage,
+  deleteMultipleQuestionsFromFirestoreAndStorage,
+  createQuizFromSelectedQuestions,
+  CreateCustomQuizParams,
 } from "./lib/quizService";
 import { screenWakeLock } from "./utils/screenWakeLock";
 import { Loader2 } from "lucide-react";
@@ -131,6 +135,29 @@ export default function App() {
   const handleAddCategory = (newCat: string) => {
     const updated = addCategory(newCat);
     setCategories(updated);
+  };
+
+  const handleDeleteQuestion = async (questionId: number, quizId?: number) => {
+    if (!currentUser || currentUser.role !== "admin") return { success: false };
+    const res = await deleteQuestionFromFirestoreAndStorage(questionId, quizId, currentUser.role);
+    await refreshQuizzes();
+    return res;
+  };
+
+  const handleDeleteMultipleQuestions = async (questionIds: number[]) => {
+    if (!currentUser || currentUser.role !== "admin") return { success: false, count: 0 };
+    const res = await deleteMultipleQuestionsFromFirestoreAndStorage(questionIds, currentUser.role);
+    await refreshQuizzes();
+    return { success: res.success, count: res.count };
+  };
+
+  const handleCreateQuizFromSelected = async (params: CreateCustomQuizParams) => {
+    if (!currentUser || currentUser.role !== "admin") {
+      throw new Error("Apenas administradores podem formar novos simulados.");
+    }
+    const createdQuiz = await createQuizFromSelectedQuestions(params, currentUser.role);
+    await refreshQuizzes();
+    return createdQuiz;
   };
 
   const handleFinishQuiz = async (
@@ -331,7 +358,15 @@ export default function App() {
           <QuestionBankScreen
             quizzes={quizzes}
             categories={categories}
+            currentUserRole={currentUser.role}
+            currentUserEmail={currentUser.email}
+            theme={theme}
             onNavigateBack={() => setActiveScreen("home")}
+            onQuizCreated={handleQuizCreated}
+            onDeleteQuestion={handleDeleteQuestion}
+            onDeleteMultipleQuestions={handleDeleteMultipleQuestions}
+            onCreateQuizFromSelected={handleCreateQuizFromSelected}
+            onStartQuiz={handleStartQuiz}
           />
         )}
 

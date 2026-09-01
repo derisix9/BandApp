@@ -34,6 +34,8 @@ import {
   clearQuizAttemptsFromStorage,
   resetQuizStatisticsInStorage,
   resetAllQuizzesStatisticsInStorage,
+  deleteQuestionFromStorage,
+  deleteMultipleQuestionsFromStorage,
 } from "../utils/storage";
 import { getPointsPerQuestion } from "../utils/scoring";
 
@@ -989,5 +991,181 @@ export async function clearAllQuizzesScoreHistoryAndRanking(): Promise<{ deleted
   }
 
   return { deletedAttemptsCount: deletedCount, quizzesResetCount };
+}
+
+/**
+ * Admin action: Delete a single question from Firestore and Local Storage
+ */
+export async function deleteQuestionFromFirestoreAndStorage(
+  questionId: number,
+  quizId?: number,
+  userRole: UserRole = "admin"
+): Promise<{ success: boolean; removedFromQuizTitle?: string; updatedQuiz?: Quiz }> {
+  // 1. Delete from local storage immediately
+  const localResult = deleteQuestionFromStorage(questionId, quizId);
+
+  // 2. Sync to Firestore
+  try {
+    if (quizId && localResult.updatedQuiz) {
+      const docRef = doc(db, QUIZZES_COLLECTION, String(quizId));
+      await withTimeout(
+        setDoc(
+          docRef,
+          {
+            questions: localResult.updatedQuiz.questions,
+            questionCount: localResult.updatedQuiz.questions.length,
+          },
+          { merge: true }
+        ),
+        3500
+      );
+    } else {
+      // Find all quizzes in Firestore or search the quiz containing this question
+      const qRef = collection(db, QUIZZES_COLLECTION);
+      const snap = await withTimeout(getDocs(qRef), 3500);
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data() as Quiz;
+        if (data.questions && data.questions.some((q) => q.id === questionId)) {
+          const remaining = data.questions.filter((q) => q.id !== questionId);
+          await withTimeout(
+            setDoc(
+              doc(db, QUIZZES_COLLECTION, docSnap.id),
+              {
+                questions: remaining,
+                questionCount: remaining.length,
+              },
+              { merge: true }
+            ),
+            3500
+          ).catch(() => {});
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Could not sync question deletion to Firestore, deleted locally:", err);
+  }
+
+  return localResult;
+}
+
+/**
+ * Admin action: Batch delete multiple questions from Firestore and Local Storage
+ */
+export async function deleteMultipleQuestionsFromFirestoreAndStorage(
+  questionIds: number[],
+  userRole: UserRole = "admin"
+): Promise<{ success: boolean; count: number; affectedQuizzes: Quiz[] }> {
+  if (!questionIds || questionIds.length === 0) {
+    return { success: true, count: 0, affectedQuizzes: [] };
+  }
+
+  // 1. Delete from local storage
+  const localResult = deleteMultipleQuestionsFromStorage(questionIds);
+
+  // 2. Sync each affected quiz to Firestore
+  try {
+    const idSet = new Set(questionIds);
+    const updatePromises = localResult.affectedQuizzes.map((quiz) => {
+      const docRef = doc(db, QUIZZES_COLLECTION, String(quiz.id));
+      return withTimeout(
+        setDoc(
+          docRef,
+          {
+            questions: quiz.questions,
+            questionCount: quiz.questions.length,
+          },
+          { merge: true }
+        ),
+        3500
+      );
+    });
+
+    if (updatePromises.length > 0) {
+      await Promise.all(updatePromises);
+    }
+  } catch (err) {
+    console.warn("Could not sync batch question deletion to Firestore:", err);
+  }
+
+  return localResult;
+}
+
+export interface CreateCustomQuizParams {
+  title: string;
+  category: string;
+  description?: string;
+  questions: Question[];
+  isPublic?: boolean;
+  allowPdfExport?: boolean;
+  allowTxtExport?: boolean;
+  timerMode?: "free" | "timed";
+  timerScope?: "general" | "individual";
+  timerUnit?: "seconds" | "minutes" | "hours";
+  timerValue?: number;
+  timerSeconds?: number;
+  timerMinutes?: number;
+  createdByEmail?: string;
+  shuffle?: boolean;
+}
+
+/**
+ * Admin action: Form a new quiz from selected questions across categories
+ */
+export async function createQuizFromSelectedQuestions(
+  params: CreateCustomQuizParams,
+  userRole: UserRole = "admin"
+): Promise<Quiz> {
+  const newQuizId = Date.now();
+  let finalQuestions = [...params.questions];
+
+  if (params.shuffle) {
+    // Fisher-Yates shuffle
+    for (let i = finalQuestions.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [finalQuestions[i], finalQuestions[j]] = [finalQuestions[j], finalQuestions[i]];
+    }
+  }
+
+  // Assign fresh IDs and bind quizId
+  const normalizedQuestions: Question[] = finalQuestions.map((q, idx) => ({
+    ...q,
+    id: newQuizId + idx + 1,
+    quizId: newQuizId,
+  }));
+
+  const uniqueCategories = Array.from(new Set(normalizedQuestions.map((q) => q.category))).filter(Boolean);
+  const categoriesSummary = uniqueCategories.join(", ");
+
+  const newQuiz: Quiz = {
+    id: newQuizId,
+    title: params.title.trim(),
+    description:
+      params.description?.trim() ||
+      `Simulado composto por ${normalizedQuestions.length} questões selecionadas (${categoriesSummary}).`,
+    category: params.category.trim() || "Multidisciplinar",
+    sourceFileName: "Curadoria do Banco de Questões",
+    sourceFileType: "JSON",
+    sourceFileHash: `curated_${newQuizId}`,
+    questionCount: normalizedQuestions.length,
+    createdAt: Date.now(),
+    totalAnswered: 0,
+    lastScorePercent: 0,
+    lastCompletedAt: 0,
+    sectionsCoveredInfo: `Questões selecionadas (${categoriesSummary})`,
+    questions: normalizedQuestions,
+    isPublic: params.isPublic !== undefined ? params.isPublic : true,
+    allowPdfExport: params.allowPdfExport !== undefined ? params.allowPdfExport : true,
+    allowTxtExport: params.allowTxtExport !== undefined ? params.allowTxtExport : true,
+    timerMode: params.timerMode || "free",
+    timerScope: params.timerScope || "general",
+    timerUnit: params.timerUnit || "minutes",
+    timerValue: params.timerValue,
+    timerSeconds: params.timerSeconds,
+    timerMinutes: params.timerMinutes,
+    createdByEmail: params.createdByEmail,
+  };
+
+  await saveQuizToFirestore(newQuiz, userRole);
+  return newQuiz;
 }
 

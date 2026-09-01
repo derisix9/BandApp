@@ -310,14 +310,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </p>
             </div>
 
-            <button
-              id="hero-create-btn"
-              onClick={() => onNavigate("create_quiz")}
-              className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs sm:text-sm shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition-all shrink-0 cursor-pointer"
-            >
-              <Upload className="w-4 h-4" />
-              Criar Questionário
-            </button>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto shrink-0">
+              <button
+                id="hero-question-bank-btn"
+                type="button"
+                onClick={() => onNavigate("question_bank")}
+                className="px-4 py-3 rounded-2xl bg-slate-800/90 hover:bg-slate-700/90 active:scale-95 text-slate-200 hover:text-white border border-slate-700/80 font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <BookOpen className="w-4 h-4 text-indigo-400" />
+                <span>Banco & Curadoria</span>
+              </button>
+
+              <button
+                id="hero-create-btn"
+                type="button"
+                onClick={() => onNavigate("create_quiz")}
+                className="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs sm:text-sm shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Criar Questionário</span>
+              </button>
+            </div>
           </div>
 
           {/* Decorative background glow */}
